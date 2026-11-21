@@ -117,4 +117,6 @@ _(empty — to be filled by the reviewer)_
   bridge + dashboard). `docs/TEAM_SETUP.md` covers Mac/Windows, SSH keys and
   multiple viewers. `server.max_clients` raised 4 → 6; new test for concurrent
   viewers and the limit. PowerShell scripts were NOT run locally (no PowerShell
-  in this container) — verified only via the Windows CI job; check its result.
+  in this container) — verified via the Windows CI job: run 44934186211 passed
+  (parse, install.ps1, robot.env parsing, bridge tests, web build, smoke test).
+  Not yet tried on a team-mate's actual laptop.
