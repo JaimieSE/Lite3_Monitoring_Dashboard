@@ -104,18 +104,24 @@ class Explorer:
         self.frontier_centroids: List[Tuple[float, float]] = []
 
     def scan(self, x: float, y: float) -> None:
+        """Ray cast with exact grid traversal (Amanatides-Woo DDA): no ray can slip
+        diagonally between two occupied cells, so walls are always closed."""
         known, truth = self.known, self.world.truth
-        step = RES * 0.5
-        n = int(SCAN_RANGE / step)
+        gx = (x - ORIGIN[0]) / RES
+        gy = (y - ORIGIN[1]) / RES
+        max_cells = SCAN_RANGE / RES
         for i in range(360):
             a = i * (2 * math.pi / 360)
-            dx, dy = math.cos(a) * step, math.sin(a) * step
-            px, py = x, y
-            for _ in range(n):
-                px += dx
-                py += dy
-                cx = int((px - ORIGIN[0]) / RES)
-                cy = int((py - ORIGIN[1]) / RES)
+            dx, dy = math.cos(a), math.sin(a)
+            cx, cy = int(gx), int(gy)
+            step_x = 1 if dx > 0 else -1
+            step_y = 1 if dy > 0 else -1
+            t_dx = abs(1.0 / dx) if dx != 0 else 1e18
+            t_dy = abs(1.0 / dy) if dy != 0 else 1e18
+            t_x = ((cx + 1 - gx) if dx > 0 else (gx - cx)) * t_dx
+            t_y = ((cy + 1 - gy) if dy > 0 else (gy - cy)) * t_dy
+            t = 0.0
+            while t <= max_cells:
                 if not (0 <= cx < W and 0 <= cy < H):
                     break
                 idx = cy * W + cx
@@ -123,6 +129,14 @@ class Explorer:
                     known[idx] = OCC
                     break
                 known[idx] = FREE
+                if t_x < t_y:
+                    t = t_x
+                    t_x += t_dx
+                    cx += step_x
+                else:
+                    t = t_y
+                    t_y += t_dy
+                    cy += step_y
 
     def frontiers(self) -> List[Tuple[float, float, int, Cell]]:
         known = self.known
@@ -185,13 +199,18 @@ class Explorer:
         sx, sy = start
         gx, gy = goal
         blocked = bytearray(blocked)
-        # Let the robot leave an inflated zone it has drifted into (known-free cells only).
+        # Let the robot leave an inflated zone it has drifted into: free known cells near
+        # the start are usable, but never cells touching an obstacle.
+        known = self.known
         r = INFLATE + 1
         for ddy in range(-r, r + 1):
             for ddx in range(-r, r + 1):
                 xx, yy = sx + ddx, sy + ddy
-                if 0 <= xx < W and 0 <= yy < H and self.known[yy * W + xx] == FREE:
-                    blocked[yy * W + xx] = 0
+                if not (1 <= xx < W - 1 and 1 <= yy < H - 1) or known[yy * W + xx] != FREE:
+                    continue
+                if any(known[(yy + j) * W + xx + i] == OCC for i in (-1, 0, 1) for j in (-1, 0, 1)):
+                    continue
+                blocked[yy * W + xx] = 0
         blocked[sy * W + sx] = 0
         blocked[gy * W + gx] = 0
         openh = [(0.0, sx, sy)]
@@ -215,6 +234,8 @@ class Explorer:
                 nx, ny = x + dx, y + dy
                 if not (0 <= nx < W and 0 <= ny < H) or blocked[ny * W + nx]:
                     continue
+                if dx and dy and (blocked[y * W + nx] or blocked[ny * W + x]):
+                    continue  # no diagonal corner cutting
                 ng = gc + cst
                 if ng < g.get((nx, ny), 1e18):
                     g[(nx, ny)] = ng
@@ -255,6 +276,13 @@ class SimSource:
         self.next_fault = time.monotonic() + 40.0
         self.battery = 92.0
         self.map_version_sent = 0
+        # collision / no-progress recovery
+        self.backing_until = 0.0
+        self.force_replan = False
+        self.replan_after_backing = False
+        self.progress_ref: Optional[Tuple[float, float, float]] = None  # (t, x, y)
+        self.collisions = 0
+        self.travelled = 0.0
 
     def _role_name(self, role: str) -> Optional[str]:
         c = self.cfg["topics"][role]["candidates"]
@@ -308,46 +336,53 @@ class SimSource:
         return time.monotonic() < self.link_down_until
 
     # ------------------------------------------------------------------- loop
+    DT = 0.05
+
     def _run(self) -> None:
-        dt = 0.05
-        k = 0
-        last_scan = last_plan = last_map = last_diag = last_frontier = 0.0
-        last_dropout = time.monotonic()
-        replan_needed = True
         while not self._stop.is_set():
             t0 = time.monotonic()
-            now = t0
-            k += 1
             try:
-                self._faults(now)
-                if self.link_dropouts and now - last_dropout > self.dropout_every:
-                    last_dropout = now
-                    self.link_down_until = now + self.dropout_dur
-                    log.info("sim: simulated link dropout for %.0fs", self.dropout_dur)
-
-                if now - last_scan >= 0.5:
-                    last_scan = now
-                    self.explorer.scan(self.x, self.y)
-                due = now - last_plan >= 8.0 or (self.goal and self._dist_to(self.goal) < 0.4)
-                if (replan_needed and now - last_plan >= 1.0) or due:
-                    last_plan = now
-                    replan_needed = not self._replan(now)
-                    last_frontier = now
-                if now - last_map >= 2.0:
-                    last_map = now
-                    self._publish_map()
-                if now - last_diag >= 1.0:
-                    last_diag = now
-                    self._publish_diag()
-                    self._publish_paths()
-                if now - last_frontier >= 3.0:
-                    last_frontier = now
-                    self._publish_frontiers(self.explorer.frontier_centroids)
-                self._step(dt, now)
-                self._publish_fast(dt, k)
+                self.tick(t0)
             except Exception:  # keep the simulator alive no matter what
                 log.exception("sim step failed")
-            self._stop.wait(max(0.0, dt - (time.monotonic() - t0)))
+            self._stop.wait(max(0.0, self.DT - (time.monotonic() - t0)))
+
+    def tick(self, now: float) -> None:
+        """Advance the simulation by one DT step. `now` may be a simulated clock (tests)."""
+        if not hasattr(self, "_t"):
+            self._t = {"scan": -1e9, "plan": -1e9, "map": -1e9, "diag": -1e9, "frontier": -1e9,
+                       "dropout": now}
+            self._k = 0
+            self._replan_needed = True
+        t = self._t
+        self._k += 1
+        self._faults(now)
+        if self.link_dropouts and now - t["dropout"] > self.dropout_every:
+            t["dropout"] = now
+            self.link_down_until = now + self.dropout_dur
+            log.info("sim: simulated link dropout for %.0fs", self.dropout_dur)
+
+        if now - t["scan"] >= 0.5:
+            t["scan"] = now
+            self.explorer.scan(self.x, self.y)
+        due = now - t["plan"] >= 8.0 or (self.goal and self._dist_to(self.goal) < 0.4)
+        if self.force_replan or (self._replan_needed and now - t["plan"] >= 1.0) or due:
+            self.force_replan = False
+            t["plan"] = now
+            self._replan_needed = not self._replan(now)
+            t["frontier"] = now
+        if now - t["map"] >= 2.0:
+            t["map"] = now
+            self._publish_map()
+        if now - t["diag"] >= 1.0:
+            t["diag"] = now
+            self._publish_diag()
+            self._publish_paths()
+        if now - t["frontier"] >= 3.0:
+            t["frontier"] = now
+            self._publish_frontiers(self.explorer.frontier_centroids)
+        self._step(self.DT, now)
+        self._publish_fast(self.DT, self._k)
 
     def _dist_to(self, p: Tuple[float, float]) -> float:
         return math.hypot(p[0] - self.x, p[1] - self.y)
@@ -444,6 +479,11 @@ class SimSource:
             tv = 0.0 if abs(err) > 0.9 else 0.55 * math.cos(err)
             if len(self.path) == 1 and self._dist_to(self.path[0]) < 0.25:
                 tv = tw = 0.0
+        if now < self.backing_until:
+            tv, tw = -0.25, 0.0  # bumper recovery: reverse away from the obstacle
+        elif self.replan_after_backing:
+            self.replan_after_backing = False
+            self.force_replan = True
         self.cmd = (tv, tw)
         # first-order dynamics
         self.v += (tv - self.v) * min(1.0, dt * 3.0)
@@ -453,14 +493,50 @@ class SimSource:
         nx = self.x + self.v * math.cos(self.yaw) * dt
         ny = self.y + self.v * math.sin(self.yaw) * dt
         if not self.world.occupied(nx, ny):
+            self.travelled += math.hypot(nx - self.x, ny - self.y)
             self.x, self.y = nx, ny
         else:
             self.v = 0.0
+            if not self._has_fault("stuck"):
+                self._on_collision(nx, ny, now)
         self.yaw = wrap_angle(self.yaw + self.w * dt)
+        self._check_progress(now)
         # slow SLAM correction drift of map->odom
         self.drift[0] += self.rng.gauss(0, 0.0004)
         self.drift[1] += self.rng.gauss(0, 0.0004)
         self.drift[2] += self.rng.gauss(0, 0.0002)
+
+    def _on_collision(self, x: float, y: float, now: float) -> None:
+        """Like a bumper/costmap: record the obstacle that the scan missed, back off, replan."""
+        cx, cy = w2c(x, y)
+        known, truth = self.explorer.known, self.world.truth
+        for ddy in (-1, 0, 1):
+            for ddx in (-1, 0, 1):
+                xx, yy = cx + ddx, cy + ddy
+                if 0 <= xx < W and 0 <= yy < H and truth[yy * W + xx] == OCC:
+                    known[yy * W + xx] = OCC
+        if now >= self.backing_until:
+            self.collisions += 1
+            self.backing_until = now + 1.5
+            self.replan_after_backing = True
+
+    def _check_progress(self, now: float) -> None:
+        """Give up on a goal if the robot has not moved 0.15 m in 6 s (not during injected stalls)."""
+        if not self.goal or self._has_fault("stuck"):
+            self.progress_ref = (now, self.x, self.y)
+            return
+        if self.progress_ref is None:
+            self.progress_ref = (now, self.x, self.y)
+            return
+        t0, x0, y0 = self.progress_ref
+        if math.hypot(self.x - x0, self.y - y0) >= 0.15:
+            self.progress_ref = (now, self.x, self.y)
+        elif now - t0 > 6.0:
+            log.info("sim: no progress towards goal, blacklisting it and replanning")
+            self.explorer.blacklist.append(self.goal)
+            self._finish_goal("ABORTED")
+            self.progress_ref = (now, self.x, self.y)
+            self.force_replan = True
 
     # ------------------------------------------------------------- publishing
     def _publish_fast(self, dt: float, k: int) -> None:

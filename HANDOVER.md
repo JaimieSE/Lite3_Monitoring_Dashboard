@@ -42,18 +42,10 @@ Agents: do not perform an action until its row says YES.
 
 ## Next tasks (in order)
 
-- [ ] **BUG (simulator only, fix first):** in a headless run the simulated robot gets
-      stuck: state STALLED from ~60 s on, nav stays EXECUTING, distance frozen at 3.5 m.
-      Reproduce with a short script that builds `TelemetryStore` + `SimSource` with
-      `topic_faults=False` and prints `store.telemetry_message()["exploration"]` every 10 s.
-      Likely causes in `bridge/lite3_bridge/sim.py`: `_step` collision check stops the
-      robot against a wall/corner while the path still points through it (path cuts
-      corners; `INFLATE` vs body size), and `_replan` only re-plans every 8 s / on goal
-      reach, never on "no progress". Suggested fix: detect no progress for ~5 s → blacklist
-      current frontier and replan; follow the path cell-by-cell near obstacles. The last
-      uncommitted-then-committed change already (a) unblocks inflated cells around the
-      start for A*, (b) excludes blacklisted frontiers from the count, (c) rate-limits
-      failed replans to 1 Hz. Add a regression test: sim must reach > 15 m in 120 s.
+- [x] ~~BUG: simulator robot stalls~~ — fixed 2026-11-21 (see Agent log).
+- [ ] **Codex: independent safety review** of the bridge (read-only guarantees, load on
+      the NUC, stale-data handling, bypasses of `tools/check_readonly.py`). Write findings
+      under "Review findings" below; do not change code in the review pass.
 - [ ] (Human) Answer the questions above and grant discovery approval.
 - [ ] Run `scripts/mac/discover-remote.sh`, commit report to `lite3-monitor/docs/discovery/`.
 - [ ] Tune `bridge/config/default.yaml` candidates/rates/frames to the discovered graph; add `expected_nodes`.
@@ -63,6 +55,10 @@ Agents: do not perform an action until its row says YES.
 - [ ] If custom Lite3 state messages exist (battery, motor temps, gait), add a read-only role + card.
 - [ ] Optional: store a final map snapshot (PNG) with each history session.
 - [ ] Optional: Playwright smoke test in CI against the simulator.
+
+## Review findings
+
+_(empty — to be filled by the reviewer)_
 
 ## Decisions log
 
@@ -86,3 +82,16 @@ Agents: do not perform an action until its row says YES.
   by design), Safari rendering.
   Known open bug: simulator robot stalls (see Next tasks). Dashboard/bridge correctly
   report it as STALLED, so this only affects the demo, not monitoring logic.
+- 2026-11-21 · Claude Code · Fixed the simulator stall. Root causes: (1) the scan
+  ray-cast stepped in half-cells and could slip past obstacle corners, so the map
+  missed obstacles; (2) when the robot drifted into the inflation margin, A* freed
+  cells touching walls and allowed diagonal corner cutting, so paths ran into corners;
+  (3) a collision just zeroed speed forever and nothing replanned. Fixes in `sim.py`:
+  exact DDA ray traversal, bumper-style recovery (mark obstacle, reverse 1.5 s, replan),
+  no-progress watchdog (6 s → blacklist goal, replan; disabled during the injected
+  "stuck" fault so that stall stays visible), no corner cutting, frontier count excludes
+  blacklisted frontiers. Loop body moved to `SimSource.tick(now)` so tests use a
+  simulated clock. New `tests/test_sim.py` (seeds 7–11): > 15 m in 120 s; exploration
+  completes with > 95 % of body-reachable floor explored; injected stall never aborted.
+  Verified: 23 bridge tests, read-only audit, real-time run with dashboard (93 m in
+  3 min, exploration complete, bridge ~2 % CPU). Simulator only; no protocol change.
