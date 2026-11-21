@@ -42,7 +42,10 @@ npm run dev                                       # http://127.0.0.1:3000
 python3 lite3-monitor/tools/check_readonly.py
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of the above.
+CI (`.github/workflows/ci.yml`) runs all of the above on Linux and again on
+Windows (PowerShell 5.1), including `scripts/windows/*.ps1`. Keep Mac (`scripts/mac`,
+bash 3.2) and Windows (`scripts/windows`, PowerShell 5.1: no `&&`, `??`, ternary)
+scripts feature-equivalent.
 
 ## Conventions
 

@@ -126,6 +126,7 @@ function LinkDelay() {
         `Telemetry one-way: ${ls.transitMs == null ? "—" : Math.round(ls.transitMs) + " ms"}`,
         `Clock offset bridge-Mac: ${ls.clockOffsetMs == null ? "—" : Math.round(ls.clockOffsetMs) + " ms"}`,
         `Received: ${ls.kbpsMain.toFixed(1)} kB/s telemetry + ${ls.kbpsMap.toFixed(1)} kB/s map`,
+        `Dashboards connected to the bridge: ${client.health?.bridge.clients ?? "—"} (map: ${client.health?.bridge.map_clients ?? "—"})`,
       ].join("\n");
   return (
     <span title={title}>

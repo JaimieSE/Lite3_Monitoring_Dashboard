@@ -110,3 +110,11 @@ _(empty — to be filled by the reviewer)_
   with 120 ms simulated delay (RTT read 243 ms; map off → 0 map clients on bridge,
   known area still updating; preference persisted across reload; back on → map
   restored).
+- 2026-11-21 · Claude Code · Windows support for team-mates: `scripts/windows/`
+  (install, start-sim, start-robot with auto-reconnecting tunnel, discover-remote),
+  `.gitattributes` (LF for sh/py), Windows CI job (PowerShell 5.1: parse check,
+  install.ps1, robot.env parsing, bridge tests, web build, live smoke test of
+  bridge + dashboard). `docs/TEAM_SETUP.md` covers Mac/Windows, SSH keys and
+  multiple viewers. `server.max_clients` raised 4 → 6; new test for concurrent
+  viewers and the limit. PowerShell scripts were NOT run locally (no PowerShell
+  in this container) — verified only via the Windows CI job; check its result.

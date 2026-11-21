@@ -199,3 +199,29 @@ def test_readonly_audit_passes_and_detects_violation(tmp_path):
     chk.ROOT = tmp_path
     chk.check_python(bad)
     assert any("create_publisher" in e for e in chk.errors)
+
+
+def test_several_viewers_at_once_and_limit():
+    """Team-mates each run a dashboard: all get the same live data; beyond max_clients is refused."""
+    from starlette.websockets import WebSocketDisconnect
+    import pytest
+    cfg = load_config()
+    cfg["server"]["max_clients"] = 3
+    store = TelemetryStore(cfg, "sim")
+    from lite3_bridge.sim import SimSource
+    src = SimSource(store, cfg)
+    src.start()
+    try:
+        app = create_app(store, cfg, src, {"hostname": "SIMULATOR"})
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws") as a, client.websocket_connect("/ws") as b, \
+                    client.websocket_connect("/ws") as c:
+                for ws in (a, b, c):
+                    assert ws.receive_json()["type"] == "hello"
+                    assert "telemetry" in _collect(ws, {"telemetry"})
+                with pytest.raises(WebSocketDisconnect):
+                    with client.websocket_connect("/ws") as d:
+                        d.receive_json()
+                assert len(app.state.broadcaster.clients) == 3
+    finally:
+        src.stop()

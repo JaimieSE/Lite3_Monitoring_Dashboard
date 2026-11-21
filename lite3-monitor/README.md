@@ -26,7 +26,18 @@ autonomous exploration competition.
                                                   └───────────────────────────────────┘
 ```
 
-## Quick start (simulation, macOS)
+## Quick start
+
+**Team-mates (Mac or Windows, several viewers at once): see [docs/TEAM_SETUP.md](docs/TEAM_SETUP.md).**
+
+Windows (PowerShell):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1
+powershell -ExecutionPolicy Bypass -File scripts\windows\start-sim.ps1
+```
+
+### Simulation, macOS
 
 Requirements: Node.js ≥ 20, Python ≥ 3.10.
 
@@ -118,3 +129,4 @@ python3 tools/check_readonly.py                      # static read-only audit (b
 - [docs/PROTOCOL.md](docs/PROTOCOL.md) – WebSocket message schema
 - [docs/SAFETY.md](docs/SAFETY.md) – read-only guarantees and how they are enforced
 - [docs/NUC_INTEGRATION.md](docs/NUC_INTEGRATION.md) – approval-gated robot rollout
+- [docs/TEAM_SETUP.md](docs/TEAM_SETUP.md) – Mac / Windows setup, SSH access, multiple viewers

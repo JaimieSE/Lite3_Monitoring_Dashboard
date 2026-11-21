@@ -11,3 +11,4 @@ lite3-monitor/bridge/config/local.yaml
 lite3-monitor/scripts/mac/robot.env
 *.log
 .DS_Store
+lite3-monitor/scripts/windows/robot.env

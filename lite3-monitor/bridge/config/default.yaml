@@ -25,7 +25,11 @@ server:
   # Non-loopback addresses are refused unless --allow-remote-bind is passed.
   host: "127.0.0.1"
   port: 8765
-  max_clients: 4
+  # Max simultaneous dashboards (each team-mate's laptop = 1 viewer; the optional
+  # map stream counts separately with the same limit). Each viewer costs the NUC
+  # roughly 5-15 kB/s of Wi-Fi upload and a little CPU; the robot's own nodes are
+  # unaffected. Extra connections are refused (the dashboard keeps retrying).
+  max_clients: 6
   # Browser origins allowed to read GET /api/clock (link-delay probe). Must match
   # the dashboard URL. Nothing else on the bridge is readable cross-origin.
   dashboard_origins: ["http://127.0.0.1:3000", "http://localhost:3000"]
