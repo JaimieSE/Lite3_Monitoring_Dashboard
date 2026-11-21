@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+lite3-monitor/web/data/
+lite3-monitor/bridge/config/local.yaml
+lite3-monitor/scripts/mac/robot.env
+*.log
+.DS_Store
