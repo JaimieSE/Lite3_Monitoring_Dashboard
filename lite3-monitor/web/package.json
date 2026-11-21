@@ -1,0 +1,31 @@
+{
+  "name": "lite3-monitor-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only mission-control dashboard for the DEEP Robotics Lite3",
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 3000",
+    "build": "next build",
+    "start": "next start -H 127.0.0.1 -p 3000",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
+  },
+  "dependencies": {
+    "next": "15.5.28",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.1.10",
+    "@types/react-dom": "19.1.7",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.19",
+    "typescript": "5.7.2"
+  },
+  "engines": {
+    "node": ">=18.18"
+  }
+}

@@ -107,8 +107,8 @@ class Explorer:
         known, truth = self.known, self.world.truth
         step = RES * 0.5
         n = int(SCAN_RANGE / step)
-        for i in range(180):
-            a = i * (2 * math.pi / 180)
+        for i in range(360):
+            a = i * (2 * math.pi / 360)
             dx, dy = math.cos(a) * step, math.sin(a) * step
             px, py = x, y
             for _ in range(n):
@@ -185,6 +185,13 @@ class Explorer:
         sx, sy = start
         gx, gy = goal
         blocked = bytearray(blocked)
+        # Let the robot leave an inflated zone it has drifted into (known-free cells only).
+        r = INFLATE + 1
+        for ddy in range(-r, r + 1):
+            for ddx in range(-r, r + 1):
+                xx, yy = sx + ddx, sy + ddy
+                if 0 <= xx < W and 0 <= yy < H and self.known[yy * W + xx] == FREE:
+                    blocked[yy * W + xx] = 0
         blocked[sy * W + sx] = 0
         blocked[gy * W + gx] = 0
         openh = [(0.0, sx, sy)]
@@ -321,7 +328,8 @@ class SimSource:
                 if now - last_scan >= 0.5:
                     last_scan = now
                     self.explorer.scan(self.x, self.y)
-                if replan_needed or now - last_plan >= 8.0 or (self.goal and self._dist_to(self.goal) < 0.4):
+                due = now - last_plan >= 8.0 or (self.goal and self._dist_to(self.goal) < 0.4)
+                if (replan_needed and now - last_plan >= 1.0) or due:
                     last_plan = now
                     replan_needed = not self._replan(now)
                     last_frontier = now
@@ -363,6 +371,7 @@ class SimSource:
         ex = self.explorer
         fr = ex.frontiers()
         fr = [f for f in fr if all(math.hypot(f[0] - b[0], f[1] - b[1]) > 0.8 for b in ex.blacklist)]
+        ex.frontier_centroids = [(f[0], f[1]) for f in fr]
         blocked = ex.blocked_mask()
         start = w2c(self.x, self.y)
         if not fr:

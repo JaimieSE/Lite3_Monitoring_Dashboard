@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Mission-control dark theme. RGB triplets so Tailwind can apply alpha. */
+:root {
+  color-scheme: dark;
+  --bg: 9 11 14;
+  --panel: 17 20 25;
+  --panel2: 23 27 34;
+  --line: 38 44 54;
+  --ink: 230 233 237;
+  --muted: 150 158 170;
+  --faint: 95 104 117;
+  /* status (reserved: never used for data series) */
+  --good: 12 163 12;
+  --warn: 250 178 25;
+  --serious: 236 131 90;
+  --crit: 208 59 59;
+  /* categorical series (dark-mode steps, validated order) */
+  --s1: 57 135 229;
+  --s2: 217 89 38;
+  --s3: 25 158 112;
+  --s4: 201 133 0;
+  --s5: 213 81 129;
+  --s7: 144 133 233;
+}
+
+html,
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
+  height: 100%;
+}
+
+body {
+  font-feature-settings: "tnum" 1, "cv11" 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+.panel {
+  @apply rounded-md border border-line bg-panel;
+}
+
+.panel-title {
+  @apply flex items-center justify-between border-b border-line px-3 py-1.5 text-2xs font-semibold uppercase tracking-[0.12em] text-muted;
+}
+
+.label {
+  @apply text-2xs uppercase tracking-[0.1em] text-faint;
+}
+
+@keyframes lostpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.lost-pulse {
+  animation: lostpulse 1.2s ease-in-out infinite;
+}
+
+/* thin scrollbars inside panels */
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: rgb(var(--line)); border-radius: 3px; }
