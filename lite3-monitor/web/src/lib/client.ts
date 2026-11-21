@@ -1,15 +1,20 @@
 // Framework-independent telemetry client.
 //
-// * RECEIVE-ONLY: it opens a websocket to the bridge and never calls send().
-// * Reconnects forever with capped exponential backoff + jitter.
-// * A watchdog closes "half-open" sockets (common after Wi-Fi drops) so the
-//   reconnect loop kicks in instead of silently showing frozen data.
+// * RECEIVE-ONLY websockets: the dashboard never calls send() on a socket.
+//   - main stream  /ws      telemetry, health, paths (always on)
+//   - map stream   /ws/map  occupancy grid (optional; opened only while the map
+//                           layer is on, so switching it off saves bandwidth)
+// * Link delay: a 1 Hz GET /api/clock probe (no parameters, changes nothing)
+//   gives round-trip time and the bridge/browser clock offset, from which the
+//   one-way delay of each telemetry message is estimated.
+// * Reconnects forever with capped exponential backoff + jitter; a watchdog
+//   closes "half-open" sockets (common after Wi-Fi drops).
 // * Freshness is measured with the browser's own clock at receipt time.
 
 import { decodeMap } from "./mapDecode";
 import type {
-  BridgeMsg, DashboardConfig, DecodedMap, HealthMsg, HelloMsg, LinkState, MapMsg, PathsMsg, TelemetryMsg,
-  TopicStatus,
+  BridgeMsg, DashboardConfig, DecodedMap, HealthMsg, HelloMsg, LinkState, LinkStats, MapMsg, PathsMsg,
+  TelemetryMsg, TopicStatus,
 } from "./types";
 import type { EventLevel, SessionEvent } from "./historyTypes";
 
@@ -18,13 +23,130 @@ export const LOST_AFTER_MS = 3500;
 const SOCKET_DEAD_AFTER_MS = 6000;
 const BACKOFF_MIN_MS = 500;
 const BACKOFF_MAX_MS = 5000;
+const PROBE_INTERVAL_MS = 1000;
+const PROBE_TIMEOUT_MS = 2500;
 
 export interface VelPoint { t: number; linear: number | null; angular: number | null; cmdLinear: number | null; cmdAngular: number | null }
 export interface RatePoint { t: number; rates: Record<string, number | null> }
 export interface CoveragePoint { t: number; knownArea: number | null; coveragePct: number | null; frontiers: number | null }
+export interface LatencyPoint { t: number; rtt: number | null; transit: number | null }
+export type MapLinkState = "off" | "disabled" | "connecting" | "live";
 
 function cap<T>(arr: T[], n: number) {
   if (arr.length > n) arr.splice(0, arr.length - n);
+}
+
+function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+/** One receive-only websocket with its own reconnect loop. */
+class Channel {
+  ws: WebSocket | null = null;
+  open = false;
+  lastRx = 0;
+  bytes = 0;
+  private stopped = true;
+  private backoff = BACKOFF_MIN_MS;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private url: () => string,
+    private onMessage: (data: string) => void,
+    private onChange: () => void,
+    private deadAfterMs: number | null,
+  ) {}
+
+  get running() {
+    return !this.stopped;
+  }
+
+  start() {
+    if (!this.stopped) return;
+    this.stopped = false;
+    this.connect();
+  }
+
+  stop() {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const ws = this.ws;
+    this.ws = null;
+    this.open = false;
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Drop the current socket and reconnect (used after a Wi-Fi drop). */
+  recycle() {
+    if (this.stopped) return;
+    const ws = this.ws;
+    this.ws = null;
+    this.open = false;
+    try {
+      ws?.close();
+    } catch {
+      /* ignore */
+    }
+    this.schedule();
+  }
+
+  /** Returns true if the socket looked dead and was recycled. */
+  watchdog(now: number): boolean {
+    if (this.deadAfterMs != null && this.ws && this.open && now - this.lastRx > this.deadAfterMs) {
+      this.recycle();
+      return true;
+    }
+    return false;
+  }
+
+  private connect() {
+    if (this.stopped) return;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(this.url());
+    } catch {
+      this.schedule();
+      return;
+    }
+    this.ws = ws;
+    ws.onopen = () => {
+      this.open = true;
+      this.backoff = BACKOFF_MIN_MS;
+      this.lastRx = Date.now();
+      this.onChange();
+    };
+    ws.onmessage = (ev) => {
+      if (typeof ev.data !== "string") return;
+      this.lastRx = Date.now();
+      this.bytes += ev.data.length;
+      this.onMessage(ev.data);
+    };
+    ws.onclose = () => {
+      if (this.ws === ws) {
+        this.ws = null;
+        this.open = false;
+        this.schedule();
+        this.onChange();
+      }
+    };
+  }
+
+  private schedule() {
+    if (this.stopped || this.timer) return;
+    const delay = this.backoff * (0.8 + Math.random() * 0.4);
+    this.backoff = Math.min(BACKOFF_MAX_MS, this.backoff * 1.7);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.connect();
+    }, delay);
+  }
 }
 
 export class TelemetryClient {
@@ -37,25 +159,29 @@ export class TelemetryClient {
   mapError: string | null = null;
 
   link: LinkState = "connecting";
-  socketOpen = false;
   everConnected = false;
-  connectAttempts = 0;
   lastRx: Record<string, number> = {};
-  lastAnyRx = 0;
   lostSince: number | null = null;
   outages = 0;
   identityProblem: string | null = null;
 
+  /** User preference: stream the occupancy grid. */
+  mapEnabled = true;
+  linkStats: LinkStats = {
+    rttMs: null, rttLastMs: null, transitMs: null, clockOffsetMs: null, probeFailures: 0, kbpsMain: 0, kbpsMap: 0,
+  };
+
   vel: VelPoint[] = [];
   rates: RatePoint[] = [];
   coverage: CoveragePoint[] = [];
+  latency: LatencyPoint[] = [];
   events: SessionEvent[] = [];
 
-  private ws: WebSocket | null = null;
-  private stopped = false;
-  private backoff = BACKOFF_MIN_MS;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private main: Channel;
+  private mapCh: Channel;
+  private stopped = true;
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private probeTimer: ReturnType<typeof setInterval> | null = null;
   private listeners = new Set<() => void>();
   private eventListeners = new Set<(e: SessionEvent) => void>();
   private version = 0;
@@ -65,23 +191,38 @@ export class TelemetryClient {
   private prevNav: string | null = null;
   private prevState: string | null = null;
   private prevTfOk: boolean | null = null;
+  private prevMapStatsVersion = -1;
   private mapDecoding = false;
   private pendingMap: MapMsg | null = null;
+  private probes: { rtt: number; offset: number; t: number }[] = [];
+  private transits: number[] = [];
+  private probing = false;
+  private lastRateCalc = Date.now();
+  private byteWindow: { t: number; main: number; map: number }[] = [];
+  private highLatency = false;
+
+  constructor() {
+    this.main = new Channel(() => this.bridgeUrl, (d) => this.handle(d, "main"), () => this.notify(), SOCKET_DEAD_AFTER_MS);
+    this.mapCh = new Channel(() => mapUrl(this.bridgeUrl), (d) => this.handle(d, "map"), () => this.notify(), null);
+  }
 
   // ------------------------------------------------------------ lifecycle
-  start(config: DashboardConfig) {
+  start(config: DashboardConfig, mapEnabled = true) {
     this.config = config;
+    this.mapEnabled = mapEnabled;
     this.stopped = false;
-    this.connect();
-    this.watchdog = setInterval(() => this.tick(), 250);
+    this.main.start();
+    this.syncMapChannel();
+    this.watchdogTimer = setInterval(() => this.tick(), 250);
+    this.probeTimer = setInterval(() => void this.probe(), PROBE_INTERVAL_MS);
   }
 
   stop() {
     this.stopped = true;
-    if (this.watchdog) clearInterval(this.watchdog);
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.ws?.close();
-    this.ws = null;
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    if (this.probeTimer) clearInterval(this.probeTimer);
+    this.main.stop();
+    this.mapCh.stop();
   }
 
   subscribe = (fn: () => void) => {
@@ -106,72 +247,62 @@ export class TelemetryClient {
     }, 160);
   }
 
-  // ----------------------------------------------------------- connection
-  private connect() {
-    if (this.stopped || !this.config) return;
-    this.connectAttempts++;
-    let ws: WebSocket;
-    try {
-      ws = new WebSocket(this.config.bridgeUrl);
-    } catch (e) {
-      this.scheduleReconnect();
-      return;
-    }
-    this.ws = ws;
-    ws.onopen = () => {
-      this.socketOpen = true;
-      this.backoff = BACKOFF_MIN_MS;
-      this.lastAnyRx = Date.now();
-      this.notify();
-    };
-    ws.onmessage = (ev) => this.handle(ev.data);
-    ws.onerror = () => {
-      /* onclose follows */
-    };
-    ws.onclose = () => {
-      if (this.ws === ws) {
-        this.ws = null;
-        this.socketOpen = false;
-        this.scheduleReconnect();
-        this.notify();
-      }
-    };
-  }
-
-  private scheduleReconnect() {
-    if (this.stopped || this.reconnectTimer) return;
-    const delay = this.backoff * (0.8 + Math.random() * 0.4);
-    this.backoff = Math.min(BACKOFF_MAX_MS, this.backoff * 1.7);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
-  }
-
-  /** Bridge URL for display. */
   get bridgeUrl() {
     return this.config?.bridgeUrl ?? "";
+  }
+
+  // ---------------------------------------------------------- map layer
+  /** Switch the occupancy-grid stream on/off. Off = the map socket is closed. */
+  setMapEnabled(on: boolean) {
+    if (on === this.mapEnabled) return;
+    this.mapEnabled = on;
+    this.emit("info", "map", on ? "Map stream switched ON" : "Map stream switched OFF (saving bandwidth)");
+    this.syncMapChannel();
+    this.notify();
+  }
+
+  get bridgeAllowsMap(): boolean {
+    return this.hello?.layers?.map?.enabled !== false;
+  }
+
+  get mapLink(): MapLinkState {
+    if (!this.bridgeAllowsMap) return "disabled";
+    if (!this.mapEnabled) return "off";
+    return this.mapCh.open && this.map ? "live" : "connecting";
+  }
+
+  private syncMapChannel() {
+    const want = !this.stopped && this.mapEnabled && this.bridgeAllowsMap;
+    if (want) this.mapCh.start();
+    else {
+      this.mapCh.stop();
+      // never keep showing a grid we are no longer receiving
+      this.map = null;
+      this.pendingMap = null;
+    }
   }
 
   // ------------------------------------------------------------ watchdog
   private tick() {
     const now = Date.now();
-    // half-open socket: no bytes for a long time -> force reconnect
-    if (this.ws && this.socketOpen && now - this.lastAnyRx > SOCKET_DEAD_AFTER_MS) {
-      const dead = this.ws;
-      this.ws = null;
-      this.socketOpen = false;
-      try {
-        dead.close();
-      } catch {
-        /* ignore */
-      }
-      this.scheduleReconnect();
+    if (this.main.watchdog(now)) this.mapCh.recycle(); // Wi-Fi drop: refresh both sockets
+
+    if (now - this.lastRateCalc >= 1000) {
+      // bandwidth averaged over the last ~5 s (the map arrives in bursts every few seconds)
+      this.byteWindow.push({ t: now, main: this.main.bytes, map: this.mapCh.bytes });
+      this.main.bytes = 0;
+      this.mapCh.bytes = 0;
+      this.lastRateCalc = now;
+      while (this.byteWindow.length > 1 && now - this.byteWindow[0].t > 5000) this.byteWindow.shift();
+      const span = Math.max(1, (now - this.byteWindow[0].t) / 1000 + 1);
+      this.linkStats.kbpsMain = this.byteWindow.reduce((a, b) => a + b.main, 0) / 1024 / span;
+      this.linkStats.kbpsMap = this.byteWindow.reduce((a, b) => a + b.map, 0) / 1024 / span;
     }
+
     const lastTel = this.lastRx.telemetry ?? 0;
     let next: LinkState;
     if (!this.everConnected) next = "connecting";
-    else if (!this.socketOpen || now - lastTel > LOST_AFTER_MS) next = "lost";
+    else if (!this.main.open || now - lastTel > LOST_AFTER_MS) next = "lost";
     else if (now - lastTel > STALE_AFTER_MS) next = "stale";
     else next = "live";
 
@@ -200,9 +331,52 @@ export class TelemetryClient {
     }
   }
 
+  // ---------------------------------------------------------- link delay
+  /** GET /api/clock: round-trip time + clock offset (NTP-style, best of recent samples). */
+  private async probe() {
+    if (this.probing || this.stopped || !this.bridgeUrl) return;
+    this.probing = true;
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
+    const p0 = performance.now();
+    const w0 = Date.now();
+    try {
+      const r = await fetch(clockUrl(this.bridgeUrl), { cache: "no-store", signal: ctrl.signal });
+      const body = (await r.json()) as { t: number };
+      const rtt = performance.now() - p0;
+      const w1 = w0 + rtt;
+      const offset = body.t * 1000 - (w0 + w1) / 2;
+      this.probes.push({ rtt, offset, t: w1 });
+      cap(this.probes, 30);
+      const recent = this.probes.slice(-5).map((p) => p.rtt);
+      // the sample with the smallest round trip gives the most accurate offset
+      const best = this.probes.reduce((a, b) => (b.rtt < a.rtt ? b : a));
+      this.linkStats.rttMs = median(recent);
+      this.linkStats.rttLastMs = rtt;
+      this.linkStats.clockOffsetMs = best.offset;
+      this.linkStats.probeFailures = 0;
+    } catch {
+      this.linkStats.probeFailures++;
+      this.linkStats.rttLastMs = null;
+    } finally {
+      clearTimeout(to);
+      this.probing = false;
+    }
+    const ls = this.linkStats;
+    const ok = ls.probeFailures === 0;
+    this.latency.push({ t: Date.now(), rtt: ok ? ls.rttLastMs : null, transit: ok ? ls.transitMs : null });
+    cap(this.latency, 900);
+    const high = ok && (ls.rttMs ?? 0) > 500;
+    if (high !== this.highLatency) {
+      this.highLatency = high;
+      if (high) this.emit("warn", "link", `High link delay: ${Math.round(ls.rttMs ?? 0)} ms round trip`);
+      else if (ok) this.emit("info", "link", `Link delay back to normal (${Math.round(ls.rttMs ?? 0)} ms)`);
+    }
+    this.notify();
+  }
+
   // -------------------------------------------------------------- inbound
-  private handle(raw: unknown) {
-    if (typeof raw !== "string") return;
+  private handle(raw: string, stream: "main" | "map") {
     let msg: BridgeMsg;
     try {
       msg = JSON.parse(raw);
@@ -210,7 +384,14 @@ export class TelemetryClient {
       return;
     }
     const now = Date.now();
-    this.lastAnyRx = now;
+    if (stream === "map") {
+      if (msg.type === "map") {
+        this.lastRx.map = now;
+        this.onMap(msg);
+      }
+      this.notify();
+      return;
+    }
     this.lastRx[msg.type] = now;
     switch (msg.type) {
       case "hello":
@@ -225,9 +406,6 @@ export class TelemetryClient {
         break;
       case "paths":
         this.paths = msg;
-        break;
-      case "map":
-        this.onMap(msg);
         break;
     }
     this.notify();
@@ -254,16 +432,29 @@ export class TelemetryClient {
       this.vel = [];
       this.rates = [];
       this.coverage = [];
+      this.latency = [];
+      this.probes = [];
+      this.transits = [];
       this.prevTopicStatus.clear();
+      this.mapCh.recycle();
       this.emit("warn", "identity", `Bridge identity changed: ${prevHost} -> ${h.identity.hostname}`);
     }
     if (this.identityProblem) this.emit("error", "identity", `IDENTITY MISMATCH: ${this.identityProblem}`);
     for (const w of h.identity.warnings) this.emit("warn", "identity", w);
+    if (!this.bridgeAllowsMap) this.emit("info", "map", "Map stream disabled in bridge config (layers.map.enabled)");
+    this.syncMapChannel();
     this.emit("info", "link", `Connected to ${h.mode === "sim" ? "SIMULATOR" : h.identity.hostname} (bridge ${h.bridge_version})`);
   }
 
   private onTelemetry(m: TelemetryMsg, now: number) {
     this.telemetry = m;
+    // one-way delay estimate: browser receipt time vs bridge send time corrected by clock offset
+    const off = this.linkStats.clockOffsetMs;
+    if (off != null) {
+      this.transits.push(Math.max(0, now - (m.server_time * 1000 - off)));
+      cap(this.transits, 10);
+      this.linkStats.transitMs = median(this.transits);
+    }
     const v = m.velocity;
     const valid = !!v?.valid;
     this.vel.push({
@@ -312,9 +503,22 @@ export class TelemetryClient {
     }
     this.rates.push({ t: now, rates });
     cap(this.rates, 900);
+    // coverage comes from health so it keeps working with the map stream off
+    const ms = h.map?.stats;
+    if (h.map && ms && h.map.version !== this.prevMapStatsVersion) {
+      this.prevMapStatsVersion = h.map.version;
+      this.coverage.push({
+        t: now,
+        knownArea: ms.known_area_m2,
+        coveragePct: ms.coverage_pct,
+        frontiers: this.telemetry?.exploration.frontier_count ?? null,
+      });
+      cap(this.coverage, 900);
+    }
   }
 
   private onMap(m: MapMsg) {
+    if (!this.mapEnabled) return;
     // decode at most one map at a time; keep only the newest pending one
     this.pendingMap = m;
     if (this.mapDecoding) return;
@@ -327,15 +531,9 @@ export class TelemetryClient {
       const m = this.pendingMap;
       this.pendingMap = null;
       try {
-        this.map = await decodeMap(m);
+        const decoded = await decodeMap(m);
+        if (this.mapEnabled) this.map = decoded;
         this.mapError = null;
-        this.coverage.push({
-          t: Date.now(),
-          knownArea: m.stats.known_area_m2,
-          coveragePct: m.stats.coverage_pct,
-          frontiers: this.telemetry?.exploration.frontier_count ?? null,
-        });
-        cap(this.coverage, 900);
       } catch (e) {
         this.mapError = e instanceof Error ? e.message : String(e);
       }
@@ -358,8 +556,31 @@ export class TelemetryClient {
     return this.link === "live" && !this.identityProblem && !!this.telemetry?.pose?.valid;
   }
 
+  /** Map statistics (from health; available even with the map stream off). */
+  get mapStats() {
+    return this.identityProblem ? null : this.health?.map?.stats ?? null;
+  }
+
   ageMs(kind: string): number | null {
     const t = this.lastRx[kind];
     return t ? Date.now() - t : null;
   }
+}
+
+export function mapUrl(bridgeUrl: string): string {
+  try {
+    const u = new URL(bridgeUrl);
+    u.pathname = u.pathname.replace(/\/+$/, "") + "/map";
+    return u.toString();
+  } catch {
+    return bridgeUrl.replace(/\/+$/, "") + "/map";
+  }
+}
+
+export function clockUrl(bridgeUrl: string): string {
+  const u = new URL(bridgeUrl);
+  u.protocol = u.protocol === "wss:" ? "https:" : "http:";
+  u.pathname = "/api/clock";
+  u.search = "";
+  return u.toString();
 }

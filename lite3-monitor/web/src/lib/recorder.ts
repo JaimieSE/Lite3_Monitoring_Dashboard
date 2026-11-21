@@ -103,8 +103,11 @@ export class Recorder {
       state: c.link === "live" ? tel?.exploration.state ?? null : null,
       frontiers: c.link === "live" ? tel?.exploration.frontier_count ?? null : null,
       distance_m: tel?.exploration.distance_travelled_m ?? null,
-      known_area_m2: c.map?.stats.known_area_m2 ?? null,
-      coverage_pct: c.map?.stats.coverage_pct ?? null,
+      known_area_m2: c.mapStats?.known_area_m2 ?? null,
+      coverage_pct: c.mapStats?.coverage_pct ?? null,
+      link_rtt_ms: c.linkStats.probeFailures === 0 && c.linkStats.rttLastMs != null ? Math.round(c.linkStats.rttLastMs) : null,
+      transit_ms: c.link === "live" && c.linkStats.transitMs != null ? Math.round(c.linkStats.transitMs) : null,
+      map_stream: c.mapLink === "live" || c.mapLink === "connecting",
       rates,
     };
     s.samples.push(smp);

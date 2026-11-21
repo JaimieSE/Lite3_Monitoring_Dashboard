@@ -29,3 +29,10 @@ test("csv has header + one row per sample and escapes commas", () => {
   assert.ok(lines[0].includes("rate_hz:/scan"));
   assert.ok(lines[1].includes('"A,B"'));
 });
+
+test("link delay summary ignores failed probes", () => {
+  const samples = [10, 20, 30, null, 1000].map((v, i) => s(i * 1000, { link_rtt_ms: v }));
+  const sum = summarize(samples, []);
+  assert.deepEqual(sum.link_rtt_ms, { median: 30, p95: 1000, max: 1000 });
+  assert.equal(summarize([s(0)], []).link_rtt_ms, null);
+});

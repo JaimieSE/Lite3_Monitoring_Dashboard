@@ -17,6 +17,12 @@ export interface Sample {
   distance_m: number | null;
   known_area_m2: number | null;
   coverage_pct: number | null;
+  /** Round-trip link delay (ms) of the latest probe; null if the probe failed. Added in v0.2. */
+  link_rtt_ms?: number | null;
+  /** Estimated one-way telemetry delay (ms). Added in v0.2. */
+  transit_ms?: number | null;
+  /** Whether the occupancy-grid stream was on. Added in v0.2. */
+  map_stream?: boolean;
   rates: Record<string, number | null>;
 }
 
@@ -46,6 +52,7 @@ export interface SessionSummary {
   final_coverage_pct: number | null;
   final_frontiers: number | null;
   link_lost_count: number;
+  link_rtt_ms: { median: number; p95: number; max: number } | null;
   link_lost_s: number;
   stall_events: number;
   error_events: number;

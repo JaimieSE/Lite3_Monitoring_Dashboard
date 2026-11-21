@@ -26,6 +26,16 @@ server:
   host: "127.0.0.1"
   port: 8765
   max_clients: 4
+  # Browser origins allowed to read GET /api/clock (link-delay probe). Must match
+  # the dashboard URL. Nothing else on the bridge is readable cross-origin.
+  dashboard_origins: ["http://127.0.0.1:3000", "http://localhost:3000"]
+
+layers:
+  map:
+    # false = never stream the occupancy grid (saves Wi-Fi bandwidth and Mac CPU).
+    # Coverage / explored-area numbers are still reported. The dashboard can also
+    # switch the map stream off at any time without changing this.
+    enabled: true
 
 rates:
   telemetry_hz: 10        # pose / velocity / nav snapshot to the dashboard

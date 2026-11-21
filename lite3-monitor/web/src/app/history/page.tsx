@@ -241,6 +241,7 @@ function SummaryGrid({ s }: { s: Session }) {
     ["Coverage", sm.final_coverage_pct != null ? `${fmt(sm.final_coverage_pct, 1)} %` : "n/a"],
     ["Frontiers left", sm.final_frontiers != null ? String(sm.final_frontiers) : "n/a"],
     ["Link losses", `${sm.link_lost_count} (${fmt(sm.link_lost_s, 0)} s)`],
+    ["Link delay", sm.link_rtt_ms ? `${sm.link_rtt_ms.median} ms (p95 ${sm.link_rtt_ms.p95})` : "n/a"],
     ["Stalls", String(sm.stall_events)],
     ["Errors / warns", `${sm.error_events} / ${sm.warn_events}`],
   ];
@@ -280,6 +281,7 @@ function Compare({ sessions }: { sessions: Session[] }) {
     ["Max speed (m/s)", (s) => fmt(s.summary.max_speed, 2)],
     ["Avg moving speed (m/s)", (s) => fmt(s.summary.avg_moving_speed, 2)],
     ["Link losses", (s) => `${s.summary.link_lost_count} (${fmt(s.summary.link_lost_s, 0)} s)`],
+    ["Link delay median / p95 (ms)", (s) => (s.summary.link_rtt_ms ? `${s.summary.link_rtt_ms.median} / ${s.summary.link_rtt_ms.p95}` : "—")],
     ["Stall events", (s) => String(s.summary.stall_events)],
     ["Errors / warnings", (s) => `${s.summary.error_events} / ${s.summary.warn_events}`],
     [`${topic} avg Hz (min)`, (s) => (s.summary.topic_rates[topic] ? `${fmt(s.summary.topic_rates[topic].avg, 1)} (${fmt(s.summary.topic_rates[topic].min, 1)})` : "—")],

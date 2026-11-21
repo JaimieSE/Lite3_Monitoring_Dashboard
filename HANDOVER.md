@@ -46,6 +46,8 @@ Agents: do not perform an action until its row says YES.
 - [ ] **Codex: independent safety review** of the bridge (read-only guarantees, load on
       the NUC, stale-data handling, bypasses of `tools/check_readonly.py`). Write findings
       under "Review findings" below; do not change code in the review pass.
+      Include the v2 additions: `GET /api/clock` (+ CORS allow-list) and the optional
+      `/ws/map` stream.
 - [ ] (Human) Answer the questions above and grant discovery approval.
 - [ ] Run `scripts/mac/discover-remote.sh`, commit report to `lite3-monitor/docs/discovery/`.
 - [ ] Tune `bridge/config/default.yaml` candidates/rates/frames to the discovered graph; add `expected_nodes`.
@@ -95,3 +97,16 @@ _(empty — to be filled by the reviewer)_
   completes with > 95 % of body-reachable floor explored; injected stall never aborted.
   Verified: 23 bridge tests, read-only audit, real-time run with dashboard (93 m in
   3 min, exploration complete, bridge ~2 % CPU). Simulator only; no protocol change.
+- 2026-11-21 · Claude Code · Protocol v2 (user request): link-delay measurement and an
+  on/off map stream. `GET /api/clock` (no input, CORS only for the dashboard origin)
+  probed at 1 Hz → RTT, clock offset, one-way telemetry delay; shown in top bar,
+  Live trends chart, health footer, recorded in history (+ summary median/p95, CSV).
+  Occupancy grid moved to its own socket `/ws/map`; the Map stream button
+  opens/closes it (remembered per browser), bridge encodes/sends nothing without map
+  clients but still reports coverage stats in `health.map.stats`. Bridge-wide off
+  switch `layers.map.enabled` / `--no-map-stream`. Simulator `--sim-latency-ms`.
+  Verified: 26 bridge tests (new: map stream split, stats without stream, config
+  disable, clock CORS), 3 web tests, typecheck, build, read-only audit, browser run
+  with 120 ms simulated delay (RTT read 243 ms; map off → 0 map clients on bridge,
+  known area still updating; preference persisted across reload; back on → map
+  restored).

@@ -77,7 +77,7 @@ export function ExplorationPanel() {
   const { client } = useTelemetry();
   const t = client.identityProblem ? null : client.telemetry;
   const ex = t?.exploration;
-  const map = client.identityProblem ? null : client.map;
+  const ms = client.mapStats; // available even with the map stream off
   const live = client.link === "live" && !client.identityProblem;
   const stateLevel: Level = !ex
     ? "idle"
@@ -88,7 +88,7 @@ export function ExplorationPanel() {
         : ex.state === "COMPLETE?" || ex.moving
           ? "good"
           : "idle";
-  const cov = map?.stats.coverage_pct;
+  const cov = ms?.coverage_pct;
   return (
     <Panel
       title="Exploration"
@@ -105,9 +105,9 @@ export function ExplorationPanel() {
           <Metric label="Runtime" value={fmtDuration(ex?.runtime_s)} />
           <Metric
             label={cov != null ? "Coverage" : "Known area"}
-            value={cov != null ? fmt(cov, 1) : fmt(map?.stats.known_area_m2, 1)}
+            value={cov != null ? fmt(cov, 1) : fmt(ms?.known_area_m2, 1)}
             unit={cov != null ? "%" : "m²"}
-            sub={cov != null ? `${fmt(map?.stats.free_area_m2, 1)} m² free` : map ? `${fmt(map.stats.free_area_m2, 1)} m² free` : "no map"}
+            sub={ms ? `${fmt(ms.free_area_m2, 1)} m² free` : "no map"}
           />
           <Metric label="Stationary" value={fmtAge(ex?.stationary_s)} level={ex && (ex.stationary_s ?? 0) > 10 && !ex.moving ? "warn" : undefined} />
           <Metric label="Stall events" value={ex?.stall_events ?? "—"} level={ex && ex.stall_events > 0 ? "warn" : undefined} />
@@ -260,7 +260,11 @@ export function HealthPanel() {
         {h ? (
           <div className="num flex flex-wrap gap-x-4 border-t border-line px-3 py-1.5 text-2xs text-faint">
             <span>bridge {h.bridge.mode} · up {fmtDuration(h.bridge.uptime_s)}</span>
-            <span>clients {h.bridge.clients}</span>
+            <span>clients {h.bridge.clients} (+{h.bridge.map_clients} map)</span>
+            <span>
+              link rtt {client.linkStats.rttMs == null ? "—" : `${Math.round(client.linkStats.rttMs)} ms`} · rx{" "}
+              {(client.linkStats.kbpsMain + client.linkStats.kbpsMap).toFixed(1)} kB/s
+            </span>
             <span>superseded frames {h.bridge.dropped_frames}</span>
             <span>tf throttled {h.bridge.tf_dropped}</span>
             <span>source: {h.source.message}</span>
@@ -367,6 +371,12 @@ export function LiveCharts() {
     },
   ];
 
+  const lat = hide ? [] : client.latency;
+  const latencySeries: Series[] = [
+    { key: "rtt", label: "Round trip", color: "s1", points: lat.map((p) => ({ x: p.t, y: p.rtt })) },
+    { key: "tr", label: "Telemetry one-way", color: "s2", dashed: true, points: lat.map((p) => ({ x: p.t, y: p.transit })) },
+  ];
+
   return (
     <Panel
       title="Live trends"
@@ -380,7 +390,7 @@ export function LiveCharts() {
         </span>
       }
     >
-      <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2 xl:grid-cols-5">
         <ChartBox title="Linear velocity">
           <TimeSeriesChart series={linear} domain={domain} unit="m/s" xFormat={fmtX} minSpan={0.4} />
         </ChartBox>
@@ -389,6 +399,9 @@ export function LiveCharts() {
         </ChartBox>
         <ChartBox title="Sensor rate, % of expected">
           <TimeSeriesChart series={rateSeries} domain={domain} unit="%" digits={0} xFormat={fmtX} refLine={{ y: 100, label: "expected" }} minSpan={20} emptyText="no rate data" />
+        </ChartBox>
+        <ChartBox title="Link delay (Wi-Fi + tunnel)">
+          <TimeSeriesChart series={latencySeries} domain={domain} unit="ms" digits={0} xFormat={fmtX} minSpan={50} emptyText="no probes yet" />
         </ChartBox>
         <ChartBox title={useCov ? "Map coverage" : "Explored (known) area"}>
           <TimeSeriesChart series={covSeries} domain={domain} unit={useCov ? "%" : "m²"} digits={1} xFormat={fmtX} minSpan={1} emptyText="no map yet" />

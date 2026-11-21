@@ -61,7 +61,7 @@ function renderGrid(map: DecodedMap): HTMLCanvasElement {
 }
 
 export function MapView() {
-  const { client, version } = useTelemetry();
+  const { client, version, setMapEnabled } = useTelemetry();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gridRef = useRef<{ version: number; canvas: HTMLCanvasElement } | null>(null);
@@ -116,6 +116,11 @@ export function MapView() {
     const live = client.poseLive;
 
     if (map && v.autoFit && v.fittedVersion !== map.version) fit();
+    // Without a grid (map stream off) "fit" keeps the robot in view instead.
+    if (!map && v.autoFit && pose) {
+      v.cx = pose.x;
+      v.cy = pose.y;
+    }
     if (v.follow && pose && pose.map_frame) {
       v.cx = pose.x;
       v.cy = pose.y;
@@ -359,6 +364,12 @@ export function MapView() {
 
       {/* toolbar */}
       <div className="absolute left-2 top-2 flex flex-wrap gap-1">
+        <MapStreamToggle
+          state={client.mapLink}
+          kbps={client.linkStats.kbpsMap}
+          onToggle={() => setMapEnabled(!client.mapEnabled)}
+        />
+        <span className="mx-0.5 w-px self-stretch bg-line" />
         <button className={btn(follow)} onClick={toggleFollow}>Follow</button>
         <button className={btn(autoFit)} onClick={fit} title="Fit the whole map and keep fitting as it grows">Fit</button>
         {(Object.keys(layers) as (keyof Layers)[]).map((k) => (
@@ -415,8 +426,13 @@ export function MapView() {
               map {map.width}×{map.height} @ {fmt(map.resolution, 2)} m · v{map.version} · age{" "}
               <span className={client.health?.map?.stale ? "text-warn" : ""}>{fmtAge(mapAge)}</span>
             </>
+          ) : client.mapLink === "off" || client.mapLink === "disabled" ? (
+            <>
+              map stream {client.mapLink} · SLAM map v{client.health?.map?.version ?? "—"} · explored{" "}
+              {fmt(client.mapStats?.known_area_m2, 1)} m² (stats only)
+            </>
           ) : (
-            "no map received"
+            "waiting for map…"
           )}
         </div>
         <div className="flex flex-col items-center rounded border border-line bg-panel/90 px-2 py-1 text-muted">
@@ -445,5 +461,30 @@ function Banner({ tone, title, detail, pulse }: { tone: "crit" | "warn" | "idle"
       <div className="text-base font-bold tracking-[0.2em]">{title}</div>
       <div className="text-xs opacity-90">{detail}</div>
     </div>
+  );
+}
+
+function MapStreamToggle({ state, kbps, onToggle }: { state: string; kbps: number; onToggle: () => void }) {
+  const on = state === "live" || state === "connecting";
+  const disabled = state === "disabled";
+  const label = disabled ? "Map: disabled" : on ? `Map stream: on${state === "live" ? ` · ${kbps.toFixed(1)} kB/s` : " · connecting"}` : "Map stream: off";
+  return (
+    <button
+      onClick={onToggle}
+      disabled={disabled}
+      title={
+        disabled
+          ? "The bridge config has layers.map.enabled: false"
+          : on
+            ? "Stop streaming the occupancy grid to save Wi-Fi bandwidth. Pose, paths, health and coverage keep updating."
+            : "Start streaming the occupancy grid again"
+      }
+      className={`flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wider disabled:opacity-50 ${
+        on ? "border-s3/60 bg-s3/15 text-ink" : "border-line bg-panel/90 text-muted hover:text-ink"
+      }`}
+    >
+      <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${on ? "bg-s3" : "border border-muted"}`} />
+      <span className="num normal-case tracking-normal">{label}</span>
+    </button>
   );
 }

@@ -86,6 +86,9 @@ def main(argv=None) -> None:
                     help="permit binding to a non-loopback address (NOT recommended)")
     ap.add_argument("--sim-link-dropouts", action="store_true", help="sim: periodically drop the link")
     ap.add_argument("--sim-no-faults", action="store_true", help="sim: disable injected topic faults")
+    ap.add_argument("--sim-latency-ms", type=float, default=0, help="sim: add one-way link delay (ms)")
+    ap.add_argument("--no-map-stream", action="store_true",
+                    help="never stream the occupancy grid (same as layers.map.enabled: false)")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
 
@@ -99,6 +102,10 @@ def main(argv=None) -> None:
         cfg["sim"]["link_dropouts"] = True
     if args.sim_no_faults:
         cfg["sim"]["topic_faults"] = False
+    if args.sim_latency_ms:
+        cfg["sim"]["latency_ms"] = args.sim_latency_ms
+    if args.no_map_stream:
+        cfg["layers"]["map"]["enabled"] = False
 
     host = cfg["server"]["host"]
     if not is_loopback(host) and not args.allow_remote_bind:

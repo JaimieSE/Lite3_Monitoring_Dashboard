@@ -19,6 +19,8 @@ export interface HelloMsg {
   type: "hello";
   protocol: number;
   bridge_version: string;
+  stream: "main" | "map";
+  layers: { map: { enabled: boolean } };
   mode: "sim" | "ros";
   read_only: boolean;
   identity: Identity;
@@ -124,9 +126,26 @@ export interface HealthMsg {
   missing_roles: string[];
   nodes: { count: number; names: string[]; missing_expected: string[]; scan_age_s: number | null };
   diagnostics: { ok: number; warn: number; error: number; stale: number; items: DiagnosticItem[]; age_s: number } | null;
-  map: { version: number; age_s: number; stale: boolean } | null;
+  map: {
+    version: number;
+    age_s: number;
+    stale: boolean;
+    width: number;
+    height: number;
+    resolution: number;
+    stats: MapStats | null; // reported even when the map stream is off
+  } | null;
   source: { ok: boolean; message: string };
-  bridge: { clients: number; dropped_frames: number; uptime_s: number; tf_dropped: number; mode: string; map_bytes: number };
+  bridge: {
+    clients: number;
+    map_clients: number;
+    map_stream_enabled: boolean;
+    dropped_frames: number;
+    uptime_s: number;
+    tf_dropped: number;
+    mode: string;
+    map_bytes: number;
+  };
 }
 
 export interface PathData {
@@ -190,6 +209,17 @@ export interface DecodedMap {
 }
 
 export type LinkState = "connecting" | "live" | "stale" | "lost";
+
+/** Link-delay measurement (round trip through Wi-Fi + SSH tunnel). */
+export interface LinkStats {
+  rttMs: number | null; // median of recent probes
+  rttLastMs: number | null;
+  transitMs: number | null; // estimated one-way bridge -> browser delay for telemetry
+  clockOffsetMs: number | null; // bridge clock - browser clock
+  probeFailures: number; // consecutive
+  kbpsMain: number; // received kB/s on the telemetry stream
+  kbpsMap: number; // received kB/s on the map stream
+}
 
 export interface DashboardConfig {
   bridgeUrl: string;

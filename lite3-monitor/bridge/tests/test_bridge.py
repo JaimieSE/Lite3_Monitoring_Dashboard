@@ -101,26 +101,87 @@ def test_topic_health_flags_multiple_publishers():
     assert "cross-robot" in t["note"]
 
 
-def test_websocket_sim_end_to_end_and_ignores_input():
+def _sim_app(map_enabled=True):
     cfg = load_config()
+    cfg["layers"]["map"]["enabled"] = map_enabled
     store = TelemetryStore(cfg, "sim")
     from lite3_bridge.sim import SimSource
     src = SimSource(store, cfg)
     src.start()
+    return src, create_app(store, cfg, src, {"hostname": "SIMULATOR"}), store
+
+
+def _collect(ws, wanted, seconds=6):
+    kinds = set()
+    deadline = time.time() + seconds
+    while time.time() < deadline and not wanted <= kinds:
+        kinds.add(ws.receive_json()["type"])
+    return kinds
+
+
+def test_websocket_sim_end_to_end_and_ignores_input():
+    src, app, _ = _sim_app()
     try:
-        app = create_app(store, cfg, src, {"hostname": "SIMULATOR"})
         with TestClient(app) as client:
             assert client.get("/healthz").json()["read_only"] is True
             assert client.post("/api/status").status_code == 405  # no write routes
             with client.websocket_connect("/ws") as ws:
                 first = ws.receive_json()
                 assert first["type"] == "hello" and first["read_only"] is True
+                assert first["layers"]["map"]["enabled"] is True
                 ws.send_text('{"op":"publish","topic":"/cmd_vel"}')  # must be ignored
-                kinds = set()
-                deadline = time.time() + 6
-                while time.time() < deadline and not {"telemetry", "health", "paths", "map"} <= kinds:
-                    kinds.add(ws.receive_json()["type"])
-                assert {"telemetry", "health", "paths", "map"} <= kinds
+                kinds = _collect(ws, {"telemetry", "health", "paths"})
+                assert {"telemetry", "health", "paths"} <= kinds
+                assert "map" not in kinds, "the grid only travels on the optional /ws/map stream"
+            with client.websocket_connect("/ws/map") as wm:
+                assert wm.receive_json()["stream"] == "map"
+                assert "map" in _collect(wm, {"map"})
+    finally:
+        src.stop()
+
+
+def test_map_stats_reported_without_map_stream():
+    """Map stream off must still give coverage numbers (cheap stats, no encoding)."""
+    src, app, store = _sim_app()
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws") as ws:
+                deadline = time.time() + 8
+                stats = None
+                while time.time() < deadline and stats is None:
+                    m = ws.receive_json()
+                    if m["type"] == "health" and m["map"] and m["map"]["stats"]:
+                        stats = m["map"]["stats"]
+                assert stats and stats["known_area_m2"] > 0
+                assert app.state.broadcaster.map_cached is None, "no map client => no encoding"
+    finally:
+        src.stop()
+
+
+def test_map_layer_disabled_in_config_rejects_map_stream():
+    src, app, _ = _sim_app(map_enabled=False)
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws") as ws:
+                assert ws.receive_json()["layers"]["map"]["enabled"] is False
+            import pytest
+            from starlette.websockets import WebSocketDisconnect
+            with pytest.raises(WebSocketDisconnect):
+                with client.websocket_connect("/ws/map") as wm:
+                    wm.receive_json()
+    finally:
+        src.stop()
+
+
+def test_clock_endpoint_cors_only_for_dashboard_origin():
+    src, app, _ = _sim_app()
+    try:
+        with TestClient(app) as client:
+            r = client.get("/api/clock", headers={"origin": "http://127.0.0.1:3000"})
+            assert abs(r.json()["t"] - time.time()) < 5
+            assert r.headers["access-control-allow-origin"] == "http://127.0.0.1:3000"
+            r2 = client.get("/api/clock", headers={"origin": "http://evil.example"})
+            assert "access-control-allow-origin" not in r2.headers
     finally:
         src.stop()
 

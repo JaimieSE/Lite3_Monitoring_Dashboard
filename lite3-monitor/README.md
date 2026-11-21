@@ -35,6 +35,7 @@ cd lite3-monitor
 ./scripts/mac/install.sh          # npm ci + local Python venv (repo-local only)
 ./scripts/mac/start-sim.sh        # simulator bridge + dashboard → http://127.0.0.1:3000
 ./scripts/mac/start-sim.sh --dropouts   # also simulate Wi-Fi loss to see TELEMETRY LOST
+./scripts/mac/start-sim.sh --latency 150   # emulate a slow link (150 ms each way)
 ```
 
 Manual equivalent:
@@ -66,7 +67,10 @@ Full procedure and checklist: [docs/NUC_INTEGRATION.md](docs/NUC_INTEGRATION.md)
 **Live** page
 - Top bar: SIM / verified / unverified / mismatch identity badge, robot@host and
   domain, link state (LIVE / STALE / TELEMETRY LOST) with age of last message,
-  recording controls.
+  **link delay** (round trip through Wi-Fi + tunnel; hover for one-way delay,
+  clock offset and kB/s), recording controls.
+- **Map stream** switch (top-left of the map): turn the occupancy grid off to save
+  bandwidth; everything else, including coverage numbers, stays live.
 - Live SLAM map (main element): occupancy grid (free / occupied / unknown), robot
   pose from TF (`map→odom→base`), trail, global/local path, frontiers, nav goal,
   1 m grid, pan/zoom/follow/auto-fit, map age. When telemetry stops the robot is

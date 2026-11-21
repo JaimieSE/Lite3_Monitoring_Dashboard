@@ -69,6 +69,7 @@ export function TopBar() {
             <span className="num w-16 text-muted" title="time since last telemetry message">
               {telAge == null ? "—" : fmtAge(telAge / 1000)}
             </span>
+            <LinkDelay />
           </span>
 
           <span className="h-4 w-px bg-line" />
@@ -108,5 +109,29 @@ export function TopBar() {
         </div>
       </div>
     </header>
+  );
+}
+
+/** Round-trip delay to the bridge (Wi-Fi + SSH tunnel), from the 1 Hz clock probe. */
+function LinkDelay() {
+  const { client } = useTelemetry();
+  const ls = client.linkStats;
+  const failed = ls.probeFailures >= 2 || ls.rttMs == null;
+  const rtt = ls.rttMs ?? 0;
+  const level: Level = failed ? (client.everConnected ? "crit" : "idle") : rtt < 150 ? "good" : rtt < 500 ? "warn" : "serious";
+  const title = failed
+    ? "Link delay probe failing (bridge unreachable)"
+    : [
+        `Round trip: ${Math.round(rtt)} ms (last ${ls.rttLastMs == null ? "—" : Math.round(ls.rttLastMs)} ms)`,
+        `Telemetry one-way: ${ls.transitMs == null ? "—" : Math.round(ls.transitMs) + " ms"}`,
+        `Clock offset bridge-Mac: ${ls.clockOffsetMs == null ? "—" : Math.round(ls.clockOffsetMs) + " ms"}`,
+        `Received: ${ls.kbpsMain.toFixed(1)} kB/s telemetry + ${ls.kbpsMap.toFixed(1)} kB/s map`,
+      ].join("\n");
+  return (
+    <span title={title}>
+      <StatusPill level={level}>
+        <span className="normal-case tracking-normal">delay {failed ? "—" : `${Math.round(rtt)} ms`}</span>
+      </StatusPill>
+    </span>
   );
 }

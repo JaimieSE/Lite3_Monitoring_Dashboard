@@ -39,6 +39,8 @@ export function summarize(samples: Sample[], events: SessionEvent[]): SessionSum
       }
     }
   }
+  const rtts = samples.map((s) => s.link_rtt_ms).filter((v): v is number => v != null).sort((a, b) => a - b);
+  const pct = (q: number) => rtts[Math.min(rtts.length - 1, Math.floor(q * rtts.length))];
   const topic_rates: Record<string, RateSummary> = {};
   for (const [k, a] of Object.entries(rateAcc)) {
     topic_rates[k] = { min: round(a.min), avg: round(a.sum / a.n), max: round(a.max), n: a.n };
@@ -57,6 +59,7 @@ export function summarize(samples: Sample[], events: SessionEvent[]): SessionSum
     final_coverage_pct: lastCov?.coverage_pct ?? null,
     final_frontiers: lastFr?.frontiers ?? null,
     link_lost_count: lostCount,
+    link_rtt_ms: rtts.length ? { median: pct(0.5), p95: pct(0.95), max: rtts[rtts.length - 1] } : null,
     link_lost_s: round(lostMs / 1000, 1),
     stall_events: events.filter((e) => e.kind === "stall" && e.level !== "info").length,
     error_events: events.filter((e) => e.level === "error").length,
@@ -72,7 +75,8 @@ function round(v: number, d = 2): number {
 
 const CSV_FIXED = [
   "t_iso", "t_ms", "elapsed_s", "link", "pose_valid", "x", "y", "yaw", "frame", "speed", "linear", "angular",
-  "cmd_linear", "state", "frontiers", "distance_m", "known_area_m2", "coverage_pct",
+  "cmd_linear", "state", "frontiers", "distance_m", "known_area_m2", "coverage_pct", "link_rtt_ms", "transit_ms",
+  "map_stream",
 ] as const;
 
 function csvCell(v: unknown): string {
@@ -89,7 +93,7 @@ export function samplesToCsv(samples: Sample[]): string {
     const fixed = [
       new Date(s.t).toISOString(), s.t, ((s.t - t0) / 1000).toFixed(1), s.link, s.pose_valid, s.x, s.y, s.yaw,
       s.frame, s.speed, s.linear, s.angular, s.cmd_linear, s.state, s.frontiers, s.distance_m, s.known_area_m2,
-      s.coverage_pct,
+      s.coverage_pct, s.link_rtt_ms, s.transit_ms, s.map_stream,
     ];
     return [...fixed, ...topics.map((t) => s.rates[t])].map(csvCell).join(",");
   });

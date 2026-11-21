@@ -85,6 +85,7 @@ class TelemetryStore:
         self.odom: Optional[Dict[str, Any]] = None
         self.map_raw: Optional[Dict[str, Any]] = None
         self.map_version = 0
+        self.map_stats: Optional[Dict[str, Any]] = None  # filled by the broadcaster
         self.paths: Dict[str, Optional[Dict[str, Any]]] = {"global": None, "local": None}
         self.goal: Optional[Dict[str, Any]] = None
         self.nav_status: Optional[Dict[str, Any]] = None
@@ -325,7 +326,9 @@ class TelemetryStore:
             map_info = None
             if self.map_raw is not None:
                 map_info = {"version": self.map_version, "age_s": _r(now - self.map_raw["rx"], 1),
-                            "stale": now - self.map_raw["rx"] > float(self.cfg["staleness"]["map_stale_s"])}
+                            "stale": now - self.map_raw["rx"] > float(self.cfg["staleness"]["map_stale_s"]),
+                            "width": self.map_raw["width"], "height": self.map_raw["height"],
+                            "resolution": self.map_raw["resolution"], "stats": self.map_stats}
             source = dict(self.source_status)
             tf_dropped = self.tf_dropped
         return {

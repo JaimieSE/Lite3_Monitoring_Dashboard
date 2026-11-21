@@ -11,11 +11,21 @@ interface Ctx {
   version: number;
   autoRecord: boolean;
   setAutoRecord: (v: boolean) => void;
+  setMapEnabled: (v: boolean) => void;
 }
 
 const TelemetryContext = createContext<Ctx | null>(null);
 
 const AUTO_KEY = "lite3.autoRecord";
+const MAP_KEY = "lite3.mapStream";
+
+function readMap(): boolean {
+  try {
+    return localStorage.getItem(MAP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 function readAuto(): boolean {
   try {
@@ -46,6 +56,16 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  /** Map stream on/off: remembered per browser. Off closes the map socket entirely. */
+  const setMapEnabled = (v: boolean) => {
+    client.setMapEnabled(v);
+    try {
+      localStorage.setItem(MAP_KEY, v ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
+
   const version = useSyncExternalStore(client.subscribe, client.getVersion, () => 0);
 
   useEffect(() => {
@@ -58,7 +78,7 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
       } catch {
         /* fall back to defaults */
       }
-      if (!cancelled) client.start(cfg);
+      if (!cancelled) client.start(cfg, readMap());
     })();
     const unload = () => recorder.flushOnUnload();
     window.addEventListener("beforeunload", unload);
@@ -80,7 +100,7 @@ export function TelemetryProvider({ children }: { children: React.ReactNode }) {
   }, [version, autoRecord, client, recorder]);
 
   return (
-    <TelemetryContext.Provider value={{ client, recorder, version: version + recVersion * 1e6, autoRecord, setAutoRecord }}>
+    <TelemetryContext.Provider value={{ client, recorder, version: version + recVersion * 1e6, autoRecord, setAutoRecord, setMapEnabled }}>
       {children}
     </TelemetryContext.Provider>
   );

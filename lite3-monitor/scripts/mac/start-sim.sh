@@ -4,12 +4,17 @@
 #   ./scripts/mac/start-sim.sh --dev      # next dev (hot reload)
 #   ./scripts/mac/start-sim.sh --dropouts # also simulate Wi-Fi drops (TELEMETRY LOST)
 #   ./scripts/mac/start-sim.sh --no-faults
+#   ./scripts/mac/start-sim.sh --latency 150   # emulate 150 ms one-way Wi-Fi delay
+#   ./scripts/mac/start-sim.sh --no-map        # bridge never streams the grid
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEV=0
 BRIDGE_ARGS=(--sim)
-for a in "$@"; do
+while [ $# -gt 0 ]; do
+  a="$1"; shift
   case "$a" in
+    --latency) BRIDGE_ARGS+=(--sim-latency-ms "$1"); shift ;;
+    --no-map) BRIDGE_ARGS+=(--no-map-stream) ;;
     --dev) DEV=1 ;;
     --dropouts) BRIDGE_ARGS+=(--sim-link-dropouts) ;;
     --no-faults) BRIDGE_ARGS+=(--sim-no-faults) ;;

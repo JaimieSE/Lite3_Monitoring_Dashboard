@@ -37,6 +37,23 @@ browser, tunnel or Wi-Fi disappear, the robot side is unaffected; the bridge
 simply has zero clients. If the bridge itself crashes, the robot's nodes do not
 notice (a subscriber leaving is a normal DDS event).
 
+## Optional map stream and link delay
+
+- The occupancy grid is the largest message (tens of KB). It travels on its own
+  socket (`/ws/map`). The **Map stream** button on the map toggles that socket; the
+  choice is remembered per browser. Off ⇒ no grid is encoded or sent (bridge
+  CPU and Wi-Fi saved), the map panel keeps drawing robot, trail, paths, goal and
+  frontiers on a plain grid, and explored-area / coverage numbers keep updating
+  from cheap cell counts in the `health` message. `layers.map.enabled: false` (or
+  `--no-map-stream`) disables it at the bridge for everyone.
+- The ROS subscription to `/map` is kept either way: it is ~1 small message every
+  few seconds and keeps the latched map available instantly when switched back on.
+- Link delay: 1 Hz `GET /api/clock` → round trip (median of last 5) shown in the
+  top bar (green < 150 ms, amber < 500 ms, orange above; red when probes fail),
+  the clock offset, and the estimated one-way telemetry delay. Charted in Live
+  trends and recorded per sample in history (`link_rtt_ms`, `transit_ms`,
+  `map_stream`). The simulator can add delay: `--sim-latency-ms 150`.
+
 ## Pose, freshness and "never show stale as live"
 
 - Pose comes from TF: the chain `map → … → base` is composed from the latest
