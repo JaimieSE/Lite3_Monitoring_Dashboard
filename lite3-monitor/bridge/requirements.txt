@@ -1,0 +1,7 @@
+# Bridge runtime dependencies (NUC and macOS simulator).
+# On the NUC, rclpy comes from /opt/ros/humble - do NOT pip install it.
+# Install into a venv created with --system-site-packages so rclpy stays visible.
+fastapi==0.115.6
+uvicorn==0.34.0
+websockets==14.1
+PyYAML==6.0.2

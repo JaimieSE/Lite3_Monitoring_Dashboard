@@ -1,0 +1,6 @@
+# Shell and Python must keep LF even when cloned on Windows (WSL / NUC use them).
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yaml text eol=lf
+# PowerShell scripts: CRLF is the safest choice for Windows PowerShell 5.1.
+*.ps1  text eol=crlf

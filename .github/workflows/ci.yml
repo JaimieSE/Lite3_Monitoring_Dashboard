@@ -1,0 +1,108 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  bridge:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: lite3-monitor/bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"   # NUC (Ubuntu 22.04 / Humble) uses Python 3.10
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: python ../tools/check_readonly.py
+
+  web:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: lite3-monitor/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: lite3-monitor/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  windows:
+    # Team-mates use Windows laptops: check the PowerShell scripts and the whole
+    # stack on Windows PowerShell 5.1 (the version every Windows 10/11 machine has).
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Parse all PowerShell scripts
+        run: |
+          $bad = 0
+          Get-ChildItem lite3-monitor\scripts\windows\*.ps1 | ForEach-Object {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs) { $bad++; $errs | ForEach-Object { Write-Host "$($_.Extent.File):$($_.Extent.StartLineNumber) $($_.Message)" } }
+          }
+          if ($bad) { exit 1 }
+      - name: install.ps1
+        run: powershell -ExecutionPolicy Bypass -File lite3-monitor\scripts\windows\install.ps1
+      - name: robot.env parsing
+        run: |
+          . lite3-monitor\scripts\windows\_common.ps1
+          Set-Content lite3-monitor\scripts\windows\robot.env "NUC_HOST=10.0.0.5   # comment`nNUC_USER=team`nEXPECTED_HOSTNAME=lite3-nuc"
+          $cfg = Read-RobotEnv
+          if ($cfg["SSH_DEST"] -ne "team@10.0.0.5" -or $cfg["LOCAL_PORT"] -ne "8765" -or $cfg["NUC_SSH_PORT"] -ne "22") { throw "parse failed: $($cfg | Out-String)" }
+          $py = Find-Python
+          if (-not $py) { throw "Find-Python failed" }
+          Write-Host "Find-Python -> $($py -join ' ')"
+      - name: Bridge tests (venv created by install.ps1)
+        working-directory: lite3-monitor\bridge
+        run: |
+          .venv\Scripts\python.exe -m pytest -q
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          .venv\Scripts\python.exe ..\tools\check_readonly.py
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Web typecheck, tests, build
+        working-directory: lite3-monitor\web
+        run: |
+          npm.cmd run typecheck; if ($LASTEXITCODE -ne 0) { exit 1 }
+          npm.cmd test;          if ($LASTEXITCODE -ne 0) { exit 1 }
+          npm.cmd run build;     if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Smoke test - simulator bridge + dashboard on Windows
+        working-directory: lite3-monitor
+        run: |
+          $bridge = Start-Process -FilePath bridge\.venv\Scripts\python.exe -ArgumentList "-m","lite3_bridge","--sim" -WorkingDirectory bridge -PassThru -NoNewWindow
+          $web = Start-Process -FilePath npm.cmd -ArgumentList "run","start" -WorkingDirectory web -PassThru -NoNewWindow
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
+              Start-Sleep 2
+              try {
+                $h = Invoke-RestMethod http://127.0.0.1:8765/healthz
+                $c = Invoke-RestMethod http://127.0.0.1:3000/api/config
+                $ok = $h.read_only -and $c.bridgeUrl
+              } catch { }
+            }
+            if (-not $ok) { throw "bridge or dashboard did not come up" }
+            $clock = Invoke-WebRequest http://127.0.0.1:8765/api/clock -Headers @{ Origin = "http://127.0.0.1:3000" } -UseBasicParsing
+            if ($clock.Headers["Access-Control-Allow-Origin"] -ne "http://127.0.0.1:3000") { throw "clock CORS header missing" }
+            Write-Host "Windows smoke test OK"
+          } finally {
+            taskkill /T /F /PID $web.Id | Out-Null
+            taskkill /T /F /PID $bridge.Id | Out-Null
+          }

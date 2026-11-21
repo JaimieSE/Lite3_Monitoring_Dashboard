@@ -1,0 +1,195 @@
+# lite3-monitor telemetry bridge configuration
+#
+# This bridge is READ-ONLY. Nothing in this file can make it publish, call
+# services/actions, or change parameters. See ../../docs/SAFETY.md.
+#
+# Copy to config/local.yaml (git-ignored) and edit, then start the bridge with
+#   --config config/local.yaml
+#
+# Every topic "role" lists CANDIDATE names. The bridge discovers the live ROS
+# graph and uses the first candidate that actually exists. Nothing is assumed:
+# a role with no existing candidate is reported as MISSING on the dashboard.
+
+identity:
+  # Human label shown on the dashboard.
+  robot_name: "Lite3"
+  # If set, the bridge REFUSES to start in ROS mode unless the NUC hostname
+  # matches exactly. Fill this in after the read-only discovery step.
+  expected_hostname: ""
+  # If set (0-232), the bridge refuses to start unless ROS_DOMAIN_ID in its
+  # environment equals this value. Leave null until the domain is confirmed.
+  expected_ros_domain_id: null
+
+server:
+  # Bind to loopback only. Reach it from the Mac through an SSH tunnel.
+  # Non-loopback addresses are refused unless --allow-remote-bind is passed.
+  host: "127.0.0.1"
+  port: 8765
+  # Max simultaneous dashboards (each team-mate's laptop = 1 viewer; the optional
+  # map stream counts separately with the same limit). Each viewer costs the NUC
+  # roughly 5-15 kB/s of Wi-Fi upload and a little CPU; the robot's own nodes are
+  # unaffected. Extra connections are refused (the dashboard keeps retrying).
+  max_clients: 6
+  # Browser origins allowed to read GET /api/clock (link-delay probe). Must match
+  # the dashboard URL. Nothing else on the bridge is readable cross-origin.
+  dashboard_origins: ["http://127.0.0.1:3000", "http://localhost:3000"]
+
+layers:
+  map:
+    # false = never stream the occupancy grid (saves Wi-Fi bandwidth and Mac CPU).
+    # Coverage / explored-area numbers are still reported. The dashboard can also
+    # switch the map stream off at any time without changing this.
+    enabled: true
+
+rates:
+  telemetry_hz: 10        # pose / velocity / nav snapshot to the dashboard
+  health_hz: 1            # topic rates, nodes, diagnostics
+  paths_hz: 1             # planned paths, trail, frontiers
+  map_min_interval_s: 2.0 # never send the map more often than this
+  graph_scan_interval_s: 5.0  # how often the ROS graph is re-discovered
+  decode_hz: 20           # max deserialisations per second for decoded topics
+
+frames:
+  map: "map"
+  odom: "odom"
+  # Candidates for the robot body frame; the first one present in TF wins.
+  base: ["base_link", "base", "body", "base_footprint", "trunk"]
+
+staleness:
+  pose_stale_s: 1.0     # pose older than this is never shown as live
+  tf_stale_s: 1.0       # dynamic TF edge older than this is flagged
+  map_stale_s: 15.0     # map older than this is flagged (maps update slowly)
+
+exploration:
+  stationary_speed_mps: 0.03   # below this the robot counts as stationary
+  stationary_after_s: 5.0      # stationary for this long => STATIONARY
+  stall_after_s: 10.0          # goal active / cmd_vel non-zero but no progress => STALLED
+  min_trail_step_m: 0.10       # trail resolution
+  max_trail_points: 2000
+  jitter_threshold_m: 0.01     # ignore pose noise below this when summing distance
+  # Optional: area of the competition arena in m^2. When set, coverage % is
+  # explored free area / arena area. Otherwise coverage is reported relative
+  # to the map's known extent only.
+  arena_area_m2: null
+
+# Topic roles. "decode" roles are deserialised (throttled by rates.decode_hz).
+# All other roles are rate-monitored only, using raw (undecoded) subscriptions.
+# expected_hz: nominal rate; min_hz: below this the topic is flagged amber.
+topics:
+  map:
+    candidates: ["/map"]
+    types: ["nav_msgs/msg/OccupancyGrid"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  odometry:
+    candidates: ["/leg_odom2", "/odom", "/leg_odom", "/odometry/filtered"]
+    types: ["nav_msgs/msg/Odometry", "geometry_msgs/msg/PoseWithCovarianceStamped", "geometry_msgs/msg/PoseStamped"]
+    expected_hz: 50
+    min_hz: 10
+    single_publisher: true
+  scan:
+    candidates: ["/scan"]
+    types: ["sensor_msgs/msg/LaserScan"]
+    expected_hz: 10
+    min_hz: 5
+    single_publisher: true
+  imu:
+    candidates: ["/imu/data", "/imu", "/imu/data_raw"]
+    types: ["sensor_msgs/msg/Imu"]
+    expected_hz: 100
+    min_hz: 50
+    single_publisher: true
+  joint_states:
+    candidates: ["/joint_states"]
+    types: ["sensor_msgs/msg/JointState"]
+    expected_hz: 50
+    min_hz: 10
+    single_publisher: false
+  tf:
+    candidates: ["/tf"]
+    types: ["tf2_msgs/msg/TFMessage"]
+    expected_hz: null
+    min_hz: 5
+    single_publisher: false
+  tf_static:
+    candidates: ["/tf_static"]
+    types: ["tf2_msgs/msg/TFMessage"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: false
+  global_plan:
+    candidates: ["/plan", "/global_plan", "/global_path"]
+    types: ["nav_msgs/msg/Path"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  local_plan:
+    candidates: ["/local_plan", "/local_path"]
+    types: ["nav_msgs/msg/Path"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  goal:
+    candidates: ["/goal_pose", "/move_base_simple/goal"]
+    types: ["geometry_msgs/msg/PoseStamped"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: false
+  nav_status:
+    # Reading the action STATUS topic is passive; the bridge never creates an
+    # action client and never sends or cancels goals.
+    candidates: ["/navigate_to_pose/_action/status"]
+    types: ["action_msgs/msg/GoalStatusArray"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  frontiers:
+    candidates: ["/explore/frontiers", "/frontiers"]
+    types: ["visualization_msgs/msg/MarkerArray", "geometry_msgs/msg/PoseArray"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  exploration_state:
+    # Optional std_msgs/String status published by the exploration node, if any.
+    candidates: []
+    types: ["std_msgs/msg/String"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  diagnostics:
+    candidates: ["/diagnostics", "/diagnostics_agg"]
+    types: ["diagnostic_msgs/msg/DiagnosticArray"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: false
+  cmd_vel:
+    # OBSERVED ONLY (subscription) to detect "commanded but not moving".
+    # The bridge never publishes to this or any topic.
+    candidates: ["/cmd_vel"]
+    types: ["geometry_msgs/msg/Twist", "geometry_msgs/msg/TwistStamped"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: false
+
+# Extra topics to rate-monitor only (raw subscription, never decoded).
+# Point clouds are intentionally NOT listed by default: even an undecoded
+# subscription receives the full payload. Add them only if needed.
+extra_health_topics: []
+#  - name: "/livox/lidar"
+#    expected_hz: 10
+#    min_hz: 5
+
+# Nodes that should be present (exact names, e.g. "/slam_toolbox").
+# Missing ones are flagged. Leave empty until discovery confirms the names.
+expected_nodes: []
+
+sim:
+  seed: 7
+  # Inject topic dropouts / stalls periodically so warnings can be exercised.
+  topic_faults: true
+  # Periodically stop sending ALL telemetry for a few seconds to exercise the
+  # TELEMETRY LOST path in the dashboard.
+  link_dropouts: false
+  link_dropout_every_s: 90
+  link_dropout_duration_s: 6
