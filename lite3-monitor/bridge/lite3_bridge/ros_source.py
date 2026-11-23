@@ -275,7 +275,7 @@ class RosSource:
 
         def cb(raw: Any) -> None:
             now = time.monotonic()
-            store.topic_rx(name, 1, now)
+            store.topic_rx(name, 1, now, len(raw) if isinstance(raw, (bytes, bytearray)) else None)
             if not decode or handler is None:
                 return
             if role == "tf" and not self._tf_take(now):

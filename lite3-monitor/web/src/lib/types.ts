@@ -122,6 +122,24 @@ export interface TopicHealth {
   value?: boolean | null;
   /** Display label for status flags, e.g. "IMU". */
   label?: string | null;
+  /** Serialized data received per second (null = size unknown / not measured). */
+  bytes_per_s?: number | null;
+}
+
+/** CPU / memory of the machine running the bridge (the NUC), grouped by component. */
+export interface ComputeStats {
+  simulated: boolean;
+  error?: string;
+  cores: number;
+  cpu_total_pct: number | null; // % of the whole machine (all cores)
+  load1: number | null;
+  mem_used_mb: number | null;
+  mem_total_mb: number | null;
+  temps: { label: string; c: number }[];
+  temp_max_c: number | null;
+  disk_free_gb: number | null;
+  components: { name: string; cpu_pct: number; rss_mb: number; processes: number }[]; // cpu_pct = % of ONE core
+  top: { name: string; component: string; cpu_pct: number; rss_mb: number }[];
 }
 
 export interface DiagnosticItem {
@@ -149,6 +167,7 @@ export interface HealthMsg {
     stats: MapStats | null; // reported even when the map stream is off
   } | null;
   source: { ok: boolean; message: string };
+  compute?: ComputeStats | null;
   bridge: {
     clients: number;
     map_clients: number;

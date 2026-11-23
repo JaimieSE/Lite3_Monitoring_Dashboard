@@ -598,15 +598,22 @@ class SimSource:
         spec = self.cfg["topics"][role]
         name = self._role_name(role)
         if name:
-            self._count_name(name, float(spec.get("expected_hz") or 10.0) * (factor or 1.0), now)
+            self._count_name(name, float(spec.get("expected_hz") or 10.0) * (factor or 1.0), now,
+                             self.SIM_SIZES.get(role, 200))
 
-    def _count_name(self, name: str, hz: float, now: float) -> None:
+    # Approximate serialized message sizes (bytes) so the data-rate column is realistic.
+    SIM_SIZES = {"odometry": 720, "imu": 330, "joint_states": 640, "scan": 1460, "tf": 230, "cmd_vel": 56,
+                 "/livox/imu": 330, "/camera/color/camera_info": 370, "/camera/depth/camera_info": 370,
+                 "/us_publisher/ultrasound_distance": 12}
+
+    def _count_name(self, name: str, hz: float, now: float, size: Optional[int] = None) -> None:
         """Add hz*DT messages per tick, carrying the fraction so the average rate is exact."""
         acc = self._rate_acc.get(name, 0.0) + hz * self.DT
         whole = int(acc)
         self._rate_acc[name] = acc - whole
         if whole:
-            self.store.topic_rx(name, whole, now)
+            sz = size if size is not None else self.SIM_SIZES.get(name, 200)
+            self.store.topic_rx(name, whole, now, whole * sz)
 
     def _publish_map(self) -> None:
         if self.odom_only:

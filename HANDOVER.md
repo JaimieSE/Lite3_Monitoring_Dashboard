@@ -195,3 +195,16 @@ _(empty — to be filled by the reviewer)_
   checks, shutdown, troubleshooting, update, reinstall). Still to verify on the robot:
   `ros2 node info /lite3_monitor_readonly` output and bridge CPU (`top`) — see
   NUC_INTEGRATION.md checklist.
+- 2026-11-23 · Claude Code · Compute & data monitoring (team request). New
+  `bridge/lite3_bridge/system_stats.py`: NUC CPU (total + per process, % of one core
+  like top), memory, temperatures (hwmon/thermal), load, disk, grouped into
+  components by `compute.components` patterns in default.yaml; reads /proc and /sys
+  only, sends process names only (no command lines); simulated on macOS / in sim.
+  Sampled every 2 s off the event loop, sent as `health.compute`. Per-topic
+  `bytes_per_s` from raw message sizes (only for topics already subscribed - heavy
+  camera / point-cloud topics stay unsubscribed). Ultrasound topic added to health.
+  `discover.py` reports kB/s; `discover-remote.sh 8 --heavy` / `-Heavy` measures heavy
+  topics once. Dashboard: "Data" column in System health, new "NUC compute" and
+  "Data per topic" panels. 33 bridge tests, typecheck, build, audit; browser check
+  with the group8 simulator. Component patterns are guesses until checked on the NUC
+  (`top` names of the camera / Livox / navigation processes).

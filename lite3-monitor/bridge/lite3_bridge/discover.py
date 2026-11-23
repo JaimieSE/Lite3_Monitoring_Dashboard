@@ -12,7 +12,7 @@ What it does (all passive):
 
 It never publishes, calls services/actions, or reads/writes parameters.
 Point-cloud and image topics are skipped by default (--include-heavy to
-sample them).
+sample them, e.g. once, to measure their kB/s).
 """
 from __future__ import annotations
 
@@ -57,6 +57,7 @@ def main(argv=None) -> int:
     services = dict(node.get_service_names_and_types())
     nodes = sorted((ns.rstrip("/") + "/" + n) for n, ns in node.get_node_names_and_namespaces())
     counts: Dict[str, int] = {t: 0 for t in topics}
+    nbytes: Dict[str, int] = {t: 0 for t in topics}
     tf_edges: Dict[str, Dict[str, Any]] = {}
     subs = []
     skipped = []
@@ -80,6 +81,7 @@ def main(argv=None) -> int:
 
         def cb(raw, name=name, cls=cls, is_tf=is_tf):
             counts[name] += 1
+            nbytes[name] += len(raw)
             if is_tf:
                 msg = deserialize_message(raw, cls)
                 for tr in msg.transforms:
@@ -121,6 +123,7 @@ def main(argv=None) -> int:
             "name": name,
             "types": topics[name],
             "rate_hz": None if name in skipped else round(counts.get(name, 0) / elapsed, 2),
+            "kbytes_per_s": None if name in skipped else round(nbytes.get(name, 0) / elapsed / 1024, 1),
             "publishers": len(infos),
             "publisher_nodes": sorted({(i.node_namespace.rstrip("/") + "/" + i.node_name) for i in infos}),
             "durability": sorted({i.qos_profile.durability.name for i in infos}),
@@ -137,11 +140,12 @@ def main(argv=None) -> int:
     for n in nodes:
         print(f"- {n}")
     print(f"\n## Topics ({len(report['topics'])})")
-    print("| topic | type | Hz | pubs | publisher nodes | QoS |")
-    print("|---|---|---|---|---|---|")
+    print("| topic | type | Hz | kB/s | pubs | publisher nodes | QoS |")
+    print("|---|---|---|---|---|---|---|")
     for t in report["topics"]:
         hz = "skipped" if t["rate_hz"] is None else f"{t['rate_hz']:.1f}"
-        print(f"| {t['name']} | {', '.join(t['types'])} | {hz} | {t['publishers']} | "
+        kb = "skipped" if t["kbytes_per_s"] is None else f"{t['kbytes_per_s']:.1f}"
+        print(f"| {t['name']} | {', '.join(t['types'])} | {hz} | {kb} | {t['publishers']} | "
               f"{', '.join(t['publisher_nodes'])} | {'/'.join(t['reliability'])} {'/'.join(t['durability'])} |")
     print(f"\n## Actions ({len(report['actions'])})")
     for a in report["actions"]:

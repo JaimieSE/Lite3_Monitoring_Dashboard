@@ -111,6 +111,10 @@ If any of these is wrong → §4 Troubleshooting.
   run; press **Record session** to start the next one.
 - **Map stream** button is shown as "Map: disabled" — expected, we run without a map.
 - **Event log** (bottom right) lists every warning: stalls, sensor dropouts, link loss.
+- **NUC compute** shows the NUC's CPU, memory, temperature and disk, and how much CPU
+  each part uses (camera driver, LiDAR driver, domain bridge, navigation, this monitor).
+  **Data per topic** shows how much data each monitored sensor stream produces.
+  To measure the heavy camera / LiDAR streams once: `./scripts/mac/discover-remote.sh 8 --heavy`.
 - **Red TELEMETRY LOST banner** = the laptop lost contact (usually Wi-Fi). The robot
   keeps running. The dashboard reconnects by itself; positions shown meanwhile are
   marked **LAST KNOWN** and are not live.

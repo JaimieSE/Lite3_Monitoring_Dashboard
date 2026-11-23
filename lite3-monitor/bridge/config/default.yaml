@@ -189,6 +189,9 @@ extra_health_topics:
   - name: "/camera/depth/camera_info"
     expected_hz: 30
     min_hz: 10
+  - name: "/us_publisher/ultrasound_distance"
+    expected_hz: 200     # measured 199.9 Hz on group8
+    min_hz: 50
 # Heavy topics deliberately NOT monitored: /livox/points, /livox/lidar,
 # /camera/depth/points, /camera/*/image_raw (see docs/SAFETY.md, resource use).
 
@@ -214,3 +217,20 @@ sim:
   link_dropouts: false
   link_dropout_every_s: 90
   link_dropout_duration_s: 6
+
+# CPU / memory per component on the machine running the bridge (the NUC), read from
+# /proc like `top`. Read-only; only process names are sent, never command lines.
+# A process belongs to the FIRST component whose pattern appears in its name or
+# command line (lower-case substring match). Unmatched processes count as "Other".
+compute:
+  enabled: true
+  interval_s: 2.0
+  components:
+    - {name: "This monitor", match: ["lite3_bridge"]}
+    - {name: "Camera driver", match: ["orbbec", "astra", "camera"]}
+    - {name: "LiDAR driver", match: ["livox"]}
+    - {name: "Domain bridge", match: ["domain_bridge"]}
+    - {name: "Navigation / LIO", match: ["fast_lio", "lio_", "nav2", "controller_server", "planner_server",
+                                         "bt_navigator", "navigation", "slam", "octomap"]}
+    - {name: "Robot driver", match: ["lite3_", "deep_robotics", "jueying", "deeprobotics"]}
+    - {name: "RViz", match: ["rviz"]}

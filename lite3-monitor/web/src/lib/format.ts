@@ -30,3 +30,10 @@ export function fmtTime(ms: number): string {
     year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
 }
+
+export function fmtBytesRate(bps: number | null | undefined): string {
+  if (bps == null || !Number.isFinite(bps)) return "—";
+  if (bps >= 1024 * 1024) return `${(bps / 1024 / 1024).toFixed(2)} MB/s`;
+  if (bps >= 1024) return `${(bps / 1024).toFixed(1)} kB/s`;
+  return `${Math.round(bps)} B/s`;
+}

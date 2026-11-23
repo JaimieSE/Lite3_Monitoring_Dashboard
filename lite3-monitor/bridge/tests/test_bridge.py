@@ -266,3 +266,49 @@ def test_sim_odom_only_behaves_like_group8():
     assert "/map" not in health and "/scan" not in health and h["missing_roles"] == []
     assert not any(t["status"] in ("error", "missing") for t in h["topics"]), h["topics"]
     assert health["/sensor_status/imu_isalive"]["value"] is True
+
+
+def test_topic_bytes_per_second():
+    s = make_store()
+    s.register_topic("odometry", "/leg_odom2", available=True, min_hz=10)
+    st = s.topics["/leg_odom2"]
+    st.last_rate_calc = time.monotonic() - 1.0
+    for _ in range(100):
+        s.topic_rx("/leg_odom2", 1, None, 720)
+    h = {t["name"]: t for t in s.health_message({})["topics"]}
+    # first window is averaged with 0 -> about half of 72 kB/s
+    assert 30000 < h["/leg_odom2"]["bytes_per_s"] < 40000
+    s.register_topic("extra", "/unknown_size", available=True)
+    s.topic_rx("/unknown_size", 5)
+    assert {t["name"]: t for t in s.health_message({})["topics"]}["/unknown_size"]["bytes_per_s"] is None
+
+
+def test_system_stats_real_and_simulated():
+    import os
+    from lite3_bridge.system_stats import SystemStats
+    cfg = load_config()
+    sim = SystemStats(cfg, simulated=True).sample()
+    assert sim["simulated"] and {c["name"] for c in sim["components"]} >= {"Camera driver", "This monitor"}
+    if os.path.isdir("/proc"):
+        real = SystemStats(cfg, simulated=False)
+        real.sample()
+        time.sleep(0.3)
+        r = real.sample()
+        assert r["simulated"] is False and r["cores"] >= 1 and r["mem_total_mb"] > 0
+        assert all(set(p) == {"name", "component", "cpu_pct", "rss_mb"} for p in r["top"])  # no cmdlines
+
+
+def test_health_carries_compute_in_sim():
+    src, app, _ = _sim_app()
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws") as ws:
+                deadline = time.time() + 8
+                compute = None
+                while time.time() < deadline and compute is None:
+                    m = ws.receive_json()
+                    if m["type"] == "health" and m.get("compute"):
+                        compute = m["compute"]
+                assert compute and compute["simulated"] and compute["components"]
+    finally:
+        src.stop()

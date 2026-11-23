@@ -57,6 +57,10 @@ class TopicStat:
     last_rx: Optional[float] = None
     rate_hz: float = 0.0
     last_rate_calc: float = field(default_factory=time.monotonic)
+    # data volume: serialized bytes received (only known for raw subscriptions)
+    window_bytes: int = 0
+    bytes_per_s: Optional[float] = None
+    bytes_known: bool = False
     # status flags (std_msgs/Bool "is alive" topics): last value and display label
     flag_value: Optional[bool] = None
     label: Optional[str] = None
@@ -113,7 +117,7 @@ class TelemetryStore:
                     setattr(st, k, v)
             return st
 
-    def topic_rx(self, name: str, n: int = 1, now: Optional[float] = None) -> None:
+    def topic_rx(self, name: str, n: int = 1, now: Optional[float] = None, nbytes: Optional[int] = None) -> None:
         st = self.topics.get(name)
         if st is None:
             return
@@ -121,6 +125,9 @@ class TelemetryStore:
             st.window_count += n
             st.total += n
             st.last_rx = now if now is not None else time.monotonic()
+            if nbytes is not None:
+                st.window_bytes += nbytes
+                st.bytes_known = True
 
     def update_rates(self) -> None:
         now = time.monotonic()
@@ -133,6 +140,11 @@ class TelemetryStore:
                 # light smoothing; reset quickly to zero when silent
                 st.rate_hz = inst if st.window_count == 0 else 0.5 * st.rate_hz + 0.5 * inst
                 st.window_count = 0
+                if st.bytes_known:
+                    binst = st.window_bytes / dt
+                    prev = st.bytes_per_s or 0.0
+                    st.bytes_per_s = binst if st.window_bytes == 0 else 0.5 * prev + 0.5 * binst
+                    st.window_bytes = 0
                 st.last_rate_calc = now
 
     # --------------------------------------------------------------------- TF
@@ -404,6 +416,7 @@ class TelemetryStore:
             "note": "; ".join(notes),
             "value": st.flag_value,
             "label": st.label,
+            "bytes_per_s": _r(st.bytes_per_s, 0) if st.bytes_known else None,
         }
 
     def paths_message(self) -> Dict[str, Any]:

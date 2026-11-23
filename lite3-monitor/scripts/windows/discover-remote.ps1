@@ -1,7 +1,7 @@
 # READ-ONLY discovery of the NUC's ROS 2 graph, zero footprint (nothing installed or
 # written on the NUC). Same as scripts/mac/discover-remote.sh. Requires approval.
 #   powershell -ExecutionPolicy Bypass -File scripts\windows\discover-remote.ps1 [-Seconds 8]
-param([int]$Seconds = 8)
+param([int]$Seconds = 8, [switch]$Heavy)   # -Heavy: also measure camera / point-cloud data rates once
 . (Join-Path $PSScriptRoot "_common.ps1")
 $cfg = Read-RobotEnv
 $ws = $cfg["NUC_LITE3_WS"]
@@ -29,7 +29,7 @@ $lines = @(
     "WS=$ws",
     'if [ -f "$WS/install/setup.bash" ]; then source "$WS/install/setup.bash" >/dev/null 2>&1; fi',
     'echo "# hostname: $(hostname)  ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-unset}" >&2',
-    "python3 - --seconds $Seconds <<'__LITE3_DISCOVER_PY__'",
+    ("python3 - --seconds $Seconds" + $(if ($Heavy) { " --include-heavy" } else { "" }) + " <<'__LITE3_DISCOVER_PY__'"),
     $py.TrimEnd("`n"),
     '__LITE3_DISCOVER_PY__'
 )

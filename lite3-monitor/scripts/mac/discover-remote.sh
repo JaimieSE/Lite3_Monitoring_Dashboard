@@ -5,6 +5,10 @@
 set -euo pipefail
 source "$(dirname "$0")/_common.sh"
 SECONDS_ARG="${1:-8}"
+# ./discover-remote.sh 8 --heavy : also sample camera images / point clouds once,
+# to measure their data rate (kB/s). Briefly adds load while it runs.
+HEAVY_ARG=""
+[ "${2:-}" = "--heavy" ] && HEAVY_ARG="--include-heavy"
 OUT="$ROOT/docs/discovery"
 mkdir -p "$OUT"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -31,7 +35,7 @@ confirm "Proceed?"
   echo "WS=${NUC_LITE3_WS:-~/lite3_ws}"
   echo 'if [ -f "$WS/install/setup.bash" ]; then source "$WS/install/setup.bash" >/dev/null 2>&1; fi'
   echo 'echo "# hostname: $(hostname)  ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-unset}" >&2'
-  echo "python3 - --seconds $SECONDS_ARG <<'__LITE3_DISCOVER_PY__'"
+  echo "python3 - --seconds $SECONDS_ARG $HEAVY_ARG <<'__LITE3_DISCOVER_PY__'"
   cat "$ROOT/bridge/lite3_bridge/discover.py"
   echo '__LITE3_DISCOVER_PY__'
 } | ssh "${SSH_OPTS[@]}" "$SSH_DEST" bash -s | tee "$OUT/discovery-$STAMP.md"

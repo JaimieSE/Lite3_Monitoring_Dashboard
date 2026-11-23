@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from . import __version__
 from .mapcodec import encode_map, grid_stats
 from .state import TelemetryStore
+from .system_stats import SystemStats
 
 log = logging.getLogger("lite3_bridge.server")
 
@@ -82,6 +83,19 @@ class Broadcaster:
         self.map_cached: Optional[str] = None
         self.map_busy = False
         self.messages_sent = 0
+        self.sysstats = SystemStats(cfg, simulated=store.mode == "sim")
+        self.compute: Optional[Dict[str, Any]] = None
+        self.compute_busy = False
+        self.compute_next = 0.0
+        self.compute_dt = float((cfg.get("compute") or {}).get("interval_s", 2.0))
+
+    async def _sample_compute(self) -> None:
+        try:
+            self.compute = await asyncio.to_thread(self.sysstats.sample)
+        except Exception:
+            log.exception("compute stats failed")
+        finally:
+            self.compute_busy = False
 
     def hello(self, stream: str = "main") -> str:
         return json.dumps({
@@ -133,8 +147,13 @@ class Broadcaster:
                         "dropped_frames": sum(c.dropped for c in self.clients | self.map_clients),
                         "map_bytes": len(self.map_cached or "") if self.map_clients else 0,
                     })
+                    health["compute"] = self.compute
                     if self.clients:
                         self._publish("health", health)
+                if not self.compute_busy and t0 >= self.compute_next:
+                    self.compute_next = t0 + self.compute_dt
+                    self.compute_busy = True
+                    asyncio.create_task(self._sample_compute())
                 if self.clients and t0 >= next_paths:
                     next_paths = t0 + paths_dt
                     self._publish("paths", self.store.paths_message())

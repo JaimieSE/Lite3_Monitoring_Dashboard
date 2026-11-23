@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTelemetry } from "./TelemetryProvider";
 import { Dot, Metric, Panel, StatusPill, topicLevel, type Level } from "./ui";
 import { TimeSeriesChart, type Series } from "./TimeSeriesChart";
-import { deg, fmt, fmtAge, fmtDuration } from "@/lib/format";
+import { deg, fmt, fmtAge, fmtBytesRate, fmtDuration } from "@/lib/format";
 
 /** Wraps live values: greys them out and labels them when they are not live. */
 function LiveGate({ live, children }: { live: boolean; children: React.ReactNode }) {
@@ -229,6 +229,7 @@ export function HealthPanel() {
               <th className="py-1 font-medium">Role</th>
               <th className="py-1 text-right font-medium">Rate</th>
               <th className="w-24 py-1 pl-2 font-medium">vs expected</th>
+              <th className="py-1 text-right font-medium">Data</th>
               <th className="py-1 text-right font-medium">Age</th>
               <th className="py-1 text-right font-medium">Pubs</th>
               <th className="px-3 py-1 font-medium">Note</th>
@@ -262,6 +263,7 @@ export function HealthPanel() {
                       <span className="text-faint">event</span>
                     )}
                   </td>
+                  <td className="num py-1 text-right text-muted">{t.status === "missing" ? "—" : fmtBytesRate(t.bytes_per_s)}</td>
                   <td className="num py-1 text-right text-muted">{fmtAge(t.age_s)}</td>
                   <td className={`num py-1 text-right ${t.publishers > 1 && t.note.includes("cross-robot") ? "text-warn" : "text-muted"}`}>{t.publishers}</td>
                   <td className="max-w-[260px] truncate px-3 py-1 text-muted" title={t.note}>{t.note}</td>
@@ -443,5 +445,121 @@ function ChartBox({ title, children }: { title: string; children: React.ReactNod
       <div className="mb-1 text-2xs font-medium text-muted">{title}</div>
       {children}
     </div>
+  );
+}
+
+/** Horizontal bar with a text value: one series, so no legend; colour is identity, not status. */
+function Bar({ label, value, max, text, sub }: { label: string; value: number; max: number; text: string; sub?: string }) {
+  const pct = max > 0 ? Math.min(100, (100 * value) / max) : 0;
+  return (
+    <div className="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-2 py-0.5 text-2xs">
+      <span className="truncate text-muted" title={label}>{label}</span>
+      <div className="h-2 rounded-sm bg-panel2">
+        <div className="h-2 rounded-sm bg-s1" style={{ width: `${Math.max(pct, value > 0 ? 1.5 : 0)}%` }} />
+      </div>
+      <span className="num min-w-[7rem] whitespace-nowrap text-right text-ink">
+        {text}
+        {sub ? <span className="text-faint"> · {sub}</span> : null}
+      </span>
+    </div>
+  );
+}
+
+export function ComputePanel() {
+  const { client } = useTelemetry();
+  const c = client.identityProblem ? null : client.health?.compute ?? null;
+  const live = client.link === "live";
+  const tLevel: Level = c?.temp_max_c == null ? "idle" : c.temp_max_c >= 90 ? "crit" : c.temp_max_c >= 80 ? "warn" : "good";
+  const cpuLevel: Level = c?.cpu_total_pct == null ? "idle" : c.cpu_total_pct >= 90 ? "crit" : c.cpu_total_pct >= 75 ? "warn" : "good";
+  const maxComp = Math.max(100, ...(c?.components ?? []).map((x) => x.cpu_pct));
+  return (
+    <Panel
+      title="NUC compute"
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={c?.simulated ? <span className="text-2xs text-warn">simulated</span> : <span className="text-2xs text-faint">from /proc · every 2 s</span>}
+    >
+      <LiveGate live={live}>
+        {!c ? (
+          <div className="px-3 py-2 text-2xs text-faint">No compute data yet</div>
+        ) : c.error ? (
+          <div className="px-3 py-2 text-2xs text-warn">▲ {c.error}</div>
+        ) : (
+          <>
+            <div className="grid grid-cols-4 gap-x-3 gap-y-2 px-3 py-2">
+              <Metric label="CPU (all cores)" value={fmt(c.cpu_total_pct, 0)} unit="%" level={cpuLevel} sub={`${c.cores} cores · load ${fmt(c.load1, 2)}`} />
+              <Metric
+                label="Memory"
+                value={c.mem_used_mb == null ? "—" : (c.mem_used_mb / 1024).toFixed(1)}
+                unit={c.mem_total_mb ? `/ ${(c.mem_total_mb / 1024).toFixed(1)} GB` : "GB"}
+              />
+              <Metric label="Hottest sensor" value={fmt(c.temp_max_c, 0)} unit="°C" level={tLevel} sub={c.temps[0]?.label ?? "no sensors"} />
+              <Metric label="Disk free" value={fmt(c.disk_free_gb, 0)} unit="GB" level={c.disk_free_gb != null && c.disk_free_gb < 5 ? "warn" : undefined} />
+            </div>
+            <div className="border-t border-line px-3 py-2">
+              <div className="mb-1 flex justify-between text-2xs text-faint">
+                <span>CPU by component (% of one core, like top)</span>
+                <span>memory</span>
+              </div>
+              {c.components.map((x) => (
+                <Bar key={x.name} label={x.name} value={x.cpu_pct} max={maxComp} text={`${x.cpu_pct.toFixed(1)} %`} sub={`${Math.round(x.rss_mb)} MB`} />
+              ))}
+              {c.components.length === 0 ? <div className="text-2xs text-faint">no busy processes</div> : null}
+            </div>
+            <div className="border-t border-line px-3 py-2 text-2xs">
+              <div className="mb-1 text-faint">Busiest processes</div>
+              {c.top.slice(0, 6).map((p, i) => (
+                <div key={`${p.name}-${i}`} className="flex gap-2 leading-5">
+                  <span className="num w-32 truncate text-ink">{p.name}</span>
+                  <span className="flex-1 truncate text-muted">{p.component}</span>
+                  <span className="num w-14 text-right text-ink">{p.cpu_pct.toFixed(1)} %</span>
+                  <span className="num w-16 text-right text-muted">{Math.round(p.rss_mb)} MB</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </LiveGate>
+    </Panel>
+  );
+}
+
+export function DataRatePanel() {
+  const { client } = useTelemetry();
+  const h = client.identityProblem ? null : client.health;
+  const live = client.link === "live";
+  const measured = (h?.topics ?? []).filter((t) => t.bytes_per_s != null && t.status !== "missing")
+    .sort((a, b) => (b.bytes_per_s ?? 0) - (a.bytes_per_s ?? 0));
+  const total = measured.reduce((a, t) => a + (t.bytes_per_s ?? 0), 0);
+  const max = Math.max(1, ...measured.map((t) => t.bytes_per_s ?? 0));
+  const ls = client.linkStats;
+  return (
+    <Panel
+      title="Data per topic"
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={<span className="num text-2xs text-faint">monitored total {fmtBytesRate(total)}</span>}
+    >
+      <LiveGate live={live}>
+        <div className="px-3 py-2">
+          {measured.map((t) => (
+            <Bar key={t.name} label={t.label ? `${t.name}` : t.name} value={t.bytes_per_s ?? 0} max={max}
+              text={fmtBytesRate(t.bytes_per_s)} sub={t.rate_hz != null ? `${t.rate_hz.toFixed(0)} Hz` : undefined} />
+          ))}
+          {measured.length === 0 ? <div className="text-2xs text-faint">No measurements yet</div> : null}
+        </div>
+        <div className="space-y-1 border-t border-line px-3 py-2 text-2xs text-faint">
+          <div>
+            Measured on the NUC from the size of each message the monitor already receives.
+            Camera images and LiDAR point clouds are <span className="text-muted">not received on purpose</span> (heavy);
+            their programs&apos; CPU shows in NUC compute. Measure their data rate once with{" "}
+            <span className="num text-muted">discover-remote.sh 8 --heavy</span>.
+          </div>
+          <div className="num">
+            Wi-Fi to this laptop: {ls.kbpsMain.toFixed(1)} kB/s telemetry + {ls.kbpsMap.toFixed(1)} kB/s map
+          </div>
+        </div>
+      </LiveGate>
+    </Panel>
   );
 }
