@@ -57,6 +57,9 @@ class TopicStat:
     last_rx: Optional[float] = None
     rate_hz: float = 0.0
     last_rate_calc: float = field(default_factory=time.monotonic)
+    # status flags (std_msgs/Bool "is alive" topics): last value and display label
+    flag_value: Optional[bool] = None
+    label: Optional[str] = None
 
 
 @dataclass
@@ -370,6 +373,9 @@ class TelemetryStore:
                 if age is not None and age > max(2.0, 3.0 / st.min_hz):
                     status = "error"
                     notes.append(f"stale {age:.1f}s")
+        if st.role == "status_flag" and st.flag_value is False and status != "missing":
+            status = "error"
+            notes.insert(0, "reports NOT alive")
         if st.single_publisher and st.publishers > 1:
             if status == "ok":
                 status = "warn"
@@ -388,6 +394,8 @@ class TelemetryStore:
             "publisher_nodes": st.publisher_nodes[:8],
             "status": status,
             "note": "; ".join(notes),
+            "value": st.flag_value,
+            "label": st.label,
         }
 
     def paths_message(self) -> Dict[str, Any]:

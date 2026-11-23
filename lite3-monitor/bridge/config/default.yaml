@@ -85,8 +85,8 @@ topics:
   odometry:
     candidates: ["/leg_odom2", "/odom", "/leg_odom", "/odometry/filtered"]
     types: ["nav_msgs/msg/Odometry", "geometry_msgs/msg/PoseWithCovarianceStamped", "geometry_msgs/msg/PoseStamped"]
-    expected_hz: 50
-    min_hz: 10
+    expected_hz: 200
+    min_hz: 100
     single_publisher: true
   scan:
     candidates: ["/scan"]
@@ -97,20 +97,20 @@ topics:
   imu:
     candidates: ["/imu/data", "/imu", "/imu/data_raw"]
     types: ["sensor_msgs/msg/Imu"]
-    expected_hz: 100
-    min_hz: 50
+    expected_hz: 200
+    min_hz: 100
     single_publisher: true
   joint_states:
     candidates: ["/joint_states"]
     types: ["sensor_msgs/msg/JointState"]
-    expected_hz: 50
-    min_hz: 10
+    expected_hz: 200
+    min_hz: 100
     single_publisher: false
   tf:
     candidates: ["/tf"]
     types: ["tf2_msgs/msg/TFMessage"]
     expected_hz: null
-    min_hz: 5
+    min_hz: null
     single_publisher: false
   tf_static:
     candidates: ["/tf_static"]
@@ -175,14 +175,33 @@ topics:
 # Extra topics to rate-monitor only (raw subscription, never decoded).
 # Point clouds are intentionally NOT listed by default: even an undecoded
 # subscription receives the full payload. Add them only if needed.
-extra_health_topics: []
-#  - name: "/livox/lidar"
-#    expected_hz: 10
-#    min_hz: 5
+# group8 discovery (2026-11-23): cheap messages that prove the camera and Livox are
+# alive, without subscribing to their heavy images / point clouds.
+extra_health_topics:
+  - name: "/livox/imu"
+    expected_hz: 15      # measured 14.7 Hz on group8
+    min_hz: 5
+  - name: "/camera/color/camera_info"
+    expected_hz: 30
+    min_hz: 10
+  - name: "/camera/depth/camera_info"
+    expected_hz: 30
+    min_hz: 10
+# Heavy topics deliberately NOT monitored: /livox/points, /livox/lidar,
+# /camera/depth/points, /camera/*/image_raw (see docs/SAFETY.md, resource use).
+
+# std_msgs/Bool "is alive" topics published by the robot (group8). Shown as
+# green/red chips; a false value or no update for > 3 s is flagged as an error.
+status_flags:
+  - {name: "/sensor_status/imu_isalive", label: "IMU", min_hz: 1}
+  - {name: "/sensor_status/joint_isalive", label: "Joints", min_hz: 1}
+  - {name: "/sensor_status/odom_isalive", label: "Odom", min_hz: 1}
+  - {name: "/sensor_status/odom2_isalive", label: "Odom2", min_hz: 1}
+  - {name: "/sensor_status/ultrasound_isalive", label: "Ultrasound", min_hz: 1}
 
 # Nodes that should be present (exact names, e.g. "/slam_toolbox").
-# Missing ones are flagged. Leave empty until discovery confirms the names.
-expected_nodes: []
+# Missing ones are flagged. On group8 only the domain bridge is visible on domain 8.
+expected_nodes: ["/lite3_domain_bridge_8"]
 
 sim:
   seed: 7

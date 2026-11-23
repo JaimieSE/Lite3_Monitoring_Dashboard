@@ -124,6 +124,7 @@ export function TfDiagPanel({ className = "" }: { className?: string }) {
   const tf = t?.tf;
   const diag = h?.diagnostics;
   const live = client.link === "live";
+  const flags = (h?.topics ?? []).filter((x) => x.role === "status_flag");
   return (
     <Panel
       title="TF & diagnostics"
@@ -132,6 +133,24 @@ export function TfDiagPanel({ className = "" }: { className?: string }) {
       className={className}
     >
       <LiveGate live={live}>
+      {flags.length ? (
+        <div className="border-b border-line px-3 py-2 text-2xs">
+          <div className="mb-1 text-faint">Robot sensor status</div>
+          <div className="flex flex-wrap gap-1">
+            {flags.map((f) => {
+              const lv: Level = f.status === "missing" ? "idle" : f.value === true && f.status !== "error" ? "good" : "crit";
+              const text = f.status === "missing" ? "missing" : f.value === true ? "alive" : f.value === false ? "NOT alive" : "no data";
+              return (
+                <span key={f.name} title={`${f.name}: ${f.note || "ok"}`}>
+                  <StatusPill level={lv}>
+                    <span className="normal-case tracking-normal">{f.label ?? f.name} · {text}</span>
+                  </StatusPill>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       <div className="px-3 py-2 text-2xs">
         <div className="mb-1 text-faint">base frame: <span className="num text-muted">{tf?.base_frame ?? "—"}</span></div>
         <div className="flex flex-wrap items-center gap-1">

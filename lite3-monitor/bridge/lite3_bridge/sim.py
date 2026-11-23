@@ -276,6 +276,7 @@ class SimSource:
         self.next_fault = time.monotonic() + 40.0
         self.battery = 92.0
         self.map_version_sent = 0
+        self._rate_acc: Dict[str, float] = {}
         # collision / no-progress recovery
         self.backing_until = 0.0
         self.force_replan = False
@@ -303,7 +304,13 @@ class SimSource:
         for extra in self.cfg.get("extra_health_topics") or []:
             s.register_topic("extra", extra["name"], expected_hz=extra.get("expected_hz"),
                              min_hz=extra.get("min_hz"), available=True, subscribed=True, publishers=1,
-                             type="sensor_msgs/msg/PointCloud2")
+                             type="(simulated)")
+        for flag in self.cfg.get("status_flags") or []:
+            st = s.register_topic("status_flag", flag["name"], label=flag.get("label") or flag["name"],
+                                  expected_hz=flag.get("expected_hz"), min_hz=flag.get("min_hz"),
+                                  available=True, subscribed=True, publishers=1, decoded=True,
+                                  type="std_msgs/msg/Bool", publisher_nodes=["/lite3_driver"])
+            st.flag_value = True
         nodes = ["/slam_toolbox", "/planner_server", "/controller_server", "/bt_navigator", "/explore_node",
                  "/robot_state_publisher", "/lite3_driver", "/lidar_driver", "/imu_driver", "/diagnostic_aggregator"]
         with s.lock:
@@ -378,6 +385,7 @@ class SimSource:
             t["diag"] = now
             self._publish_diag()
             self._publish_paths()
+            self._publish_flags()
         if now - t["frontier"] >= 3.0:
             t["frontier"] = now
             self._publish_frontiers(self.explorer.frontier_centroids)
@@ -557,17 +565,30 @@ class SimSource:
             s.set_tf("map", "odom", (dx, dy, 0.0), quat_from_yaw(dth), static=False, now=now)
         s.set_tf("odom", "base_link", (ox, oy, 0.32), quat_from_yaw(oyaw), static=False, now=now)
         n = self._role_name
-        s.topic_rx(n("odometry") or "/odom", 2 if k % 2 == 0 else 3, now)        # ~50 Hz
+        # Rates follow the configured expected_hz (group8 publishes odom/IMU/joints at 200 Hz).
+        self._count("odometry", None, now)
         s.topic_rx(n("tf") or "/tf", 3, now)                                       # ~60 Hz
         s.topic_rx(n("cmd_vel") or "/cmd_vel", 1, now)                             # 20 Hz
-        s.topic_rx(n("joint_states") or "/joint_states", 2 if k % 2 == 0 else 3, now)
-        imu_n = 2 if self._has_fault("imu_degraded") else 5                        # 100 Hz / 40 Hz
-        s.topic_rx(n("imu") or "/imu/data", imu_n - (1 if k % 3 == 0 and imu_n == 2 else 0), now)
-        if not self._has_fault("scan_dropout") and k % 2 == 0:
-            s.topic_rx(n("scan") or "/scan", 1, now)                               # 10 Hz
+        self._count("joint_states", None, now)
+        self._count("imu", 0.2 if self._has_fault("imu_degraded") else None, now)  # fault: 20 % rate
+        if not self._has_fault("scan_dropout"):
+            self._count("scan", None, now)
         for extra in self.cfg.get("extra_health_topics") or []:
-            if k % 2 == 0:
-                s.topic_rx(extra["name"], 1, now)
+            self._count_name(extra["name"], extra.get("expected_hz") or 10.0, now)
+
+    def _count(self, role: str, factor, now: float) -> None:
+        spec = self.cfg["topics"][role]
+        name = self._role_name(role)
+        if name:
+            self._count_name(name, float(spec.get("expected_hz") or 10.0) * (factor or 1.0), now)
+
+    def _count_name(self, name: str, hz: float, now: float) -> None:
+        """Add hz*DT messages per tick, carrying the fraction so the average rate is exact."""
+        acc = self._rate_acc.get(name, 0.0) + hz * self.DT
+        whole = int(acc)
+        self._rate_acc[name] = acc - whole
+        if whole:
+            self.store.topic_rx(name, whole, now)
 
     def _publish_map(self) -> None:
         s = self.store
@@ -597,6 +618,15 @@ class SimSource:
             s.frontiers = {"count": len(centroids), "points": [[round(x, 2), round(y, 2)] for x, y in centroids],
                            "frame": "map", "rx": time.monotonic()}
         s.topic_rx(self._role_name("frontiers") or "/frontiers")
+
+    def _publish_flags(self) -> None:
+        """Robot-reported 'is alive' booleans; the IMU one goes false during the IMU fault."""
+        for flag in self.cfg.get("status_flags") or []:
+            st = self.store.topics.get(flag["name"])
+            if st is None:
+                continue
+            st.flag_value = not ("imu" in flag["name"] and self._has_fault("imu_degraded"))
+            self.store.topic_rx(flag["name"], 2)  # called at 1 Hz -> 2 msgs/s like the robot
 
     def _publish_diag(self) -> None:
         s = self.store

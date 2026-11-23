@@ -34,6 +34,28 @@ Agents: do not perform an action until its row says YES.
 - SSH from the team's Mac works. IP address and username are kept only in each
   laptop's git-ignored `scripts/*/robot.env`, never in this repo.
 
+## Discovery findings — group8, 2026-11-23 (`lite3-monitor/docs/discovery/discovery-20261123-151619.md`)
+
+- Domain 8 contains ONE node: `/lite3_domain_bridge_8` (a ROS domain bridge). It
+  republishes 31 topics from the robot's internal domain into domain 8. The robot's
+  real nodes run on another domain and are not visible here.
+- Available on domain 8: `/leg_odom2` (Odometry, 200 Hz), `/leg_odom`
+  (PoseWithCovarianceStamped, 200 Hz), `/imu/data` 200 Hz, `/joint_states` 200 Hz,
+  `/handle_state` (Twist, 200 Hz, meaning unknown), `/us_publisher/ultrasound_distance`
+  (Float64, 200 Hz), `/livox/points` + `/livox/lidar` + `/livox/imu` (14.7 Hz), Orbbec
+  camera topics (~30 Hz), five `/sensor_status/*_isalive` Bool topics (2 Hz), static TF
+  only (base_link → camera_link, livox_frame).
+- NOT present on domain 8 at discovery time: `/map`, `/scan`, dynamic `/tf`
+  (no odom → base_link, no map → odom), any navigation / exploration topics or
+  actions, any terrain-hazard cloud. Either SLAM/nav were not running, or they run
+  on another domain and are not bridged into domain 8 (open question 9).
+- Consequence today: dashboard pose = `/leg_odom2` in its odom frame (no map
+  alignment), health + sensor flags work; map / paths / goal / frontiers stay empty.
+- Read-only evidence from the discovery run: `/parameter_events` had 0 publishers
+  and `/rosout` only the domain bridge, i.e. the monitor's node created neither.
+- Config updated accordingly (200 Hz expectations, `/tf` not required, cheap
+  camera/Livox liveness topics, `status_flags`, expected node = domain bridge).
+
 ## Open questions for the team
 
 1. ~~NUC address, user, hostname~~ — answered (see Known robot facts).
@@ -46,6 +68,14 @@ Agents: do not perform an action until its row says YES.
 6. ~~Internet / Python~~ — answered: yes, 3.10.12.
 7. Arena area in m² (to report coverage % instead of explored area).
 8. Any custom message types in `lite3_ws` that carry useful state (battery, gait, mode)?
+9. **Where do SLAM / navigation / exploration run, and on which ROS domain?** On the
+   computer where RViz2 shows the map, what is `echo $ROS_DOMAIN_ID`, and which topic
+   names does RViz2's Displays panel use for the map, robot pose/TF, paths and the
+   terrain hazard cloud? Were they running during discovery? (Bridging more topics
+   into domain 8 would be a change to the robot setup — the team's decision, not this
+   project's.)
+10. What do `/handle_state` (Twist, 200 Hz) and `/us_publisher/ultrasound_distance`
+    represent (e.g. joystick command, nearest-obstacle distance in metres)?
 
 ## Next tasks (in order)
 
@@ -136,3 +166,12 @@ _(empty — to be filled by the reviewer)_
   Note for start-bridge: the bridge already refuses to start if ROS_DOMAIN_ID does
   not match `identity.expected_ros_domain_id`, so it must be run from a shell where
   the team's environment is loaded (or with `ROS_DOMAIN_ID=8` exported).
+- 2026-11-23 · Claude Code · Analysed the first real discovery report (see
+  "Discovery findings"). Tuned `bridge/config/default.yaml` to group8 (200 Hz
+  odom/IMU/joints, `/tf` optional, camera_info + livox/imu liveness, expected node).
+  New `status_flags` config + `status_flag` role: robot "is alive" Bool topics shown
+  as chips in the TF & diagnostics panel; false ⇒ error; exempt from decode
+  throttling (a quick true→false must not be skipped — caught by the new test).
+  Simulator now emits rates from config and the flags (IMU flag false during the
+  IMU fault). 28 bridge tests, typecheck, build, read-only audit pass; browser check
+  of the chips against the simulator. Blocked on open question 9 for map/nav data.

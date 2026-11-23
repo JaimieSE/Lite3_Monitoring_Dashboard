@@ -222,3 +222,21 @@ def test_decoding_is_throttled_but_counting_is_not(ros_source):
         cb(b"raw")
     assert store.topics["/odom"].total == 100
     assert len(calls) <= 2
+
+
+def test_status_flags_subscribed_and_false_is_error(ros_source):
+    src, store = make(ros_source, {"/sensor_status/imu_isalive": ["std_msgs/msg/Bool"],
+                                   "/sensor_status/joint_isalive": ["std_msgs/msg/Float64"]})
+    sub = sub_for(src, "/sensor_status/imu_isalive")
+    sub.cb(NS(data=True))
+    assert store.topics["/sensor_status/imu_isalive"].flag_value is True
+    sub.cb(NS(data=False))
+    h = {t["name"]: t for t in store.health_message({})["topics"]}
+    imu = h["/sensor_status/imu_isalive"]
+    assert imu["value"] is False and imu["status"] == "error" and "NOT alive" in imu["note"]
+    assert imu["label"] == "IMU"
+    # wrong type is reported, not subscribed
+    assert "unexpected type" in h["/sensor_status/joint_isalive"]["note"]
+    assert not any(s.name == "/sensor_status/joint_isalive" for s in src.node.subs)
+    # configured but absent from the graph -> missing
+    assert h["/sensor_status/ultrasound_isalive"]["status"] == "missing"

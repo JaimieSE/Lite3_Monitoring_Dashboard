@@ -37,9 +37,10 @@ NODE_NAME = "lite3_monitor_readonly"
 
 # Roles whose content we decode. Everything else is counted only.
 DECODED_ROLES = {"map", "odometry", "tf", "tf_static", "global_plan", "local_plan", "goal", "nav_status",
-                 "frontiers", "exploration_state", "diagnostics", "cmd_vel"}
+                 "frontiers", "exploration_state", "diagnostics", "cmd_vel", "status_flag"}
 # Rare / latched roles: always decode (never throttled).
-UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state"}
+UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state", "status_flag"}
+FLAG_TYPE = "std_msgs/msg/Bool"
 # Roles where we prefer RELIABLE (if every publisher offers it) so large or
 # rare messages are not silently lost.
 RELIABLE_ROLES = {"map", "tf_static", "goal", "nav_status", "frontiers", "exploration_state", "global_plan"}
@@ -149,6 +150,10 @@ class RosSource:
         for extra in self.cfg.get("extra_health_topics") or []:
             self.store.register_topic("extra", extra["name"], expected_hz=extra.get("expected_hz"),
                                       min_hz=extra.get("min_hz"))
+        for flag in self.cfg.get("status_flags") or []:
+            self.store.register_topic("status_flag", flag["name"], label=flag.get("label") or flag["name"],
+                                      expected_hz=flag.get("expected_hz"), min_hz=flag.get("min_hz"),
+                                      type=FLAG_TYPE)
 
     # -------------------------------------------------------------- discovery
     def _scan_graph(self) -> None:
@@ -195,6 +200,17 @@ class RosSource:
             if name in names_types and name not in self.subs:
                 s.register_topic("extra", name, type=names_types[name][0], available=True)
                 self._subscribe("extra", name, names_types[name][0])
+
+        for flag in self.cfg.get("status_flags") or []:
+            name = flag["name"]
+            if name in names_types and name not in self.subs:
+                st = s.topics[name]
+                if FLAG_TYPE not in names_types[name]:
+                    st.error = f"unexpected type {names_types[name]} (expected {FLAG_TYPE})"
+                    continue
+                st.available = True
+                st.decoded = True
+                self._subscribe("status_flag", name, FLAG_TYPE)
 
         # publisher counts and availability for everything we track
         for name, st in list(s.topics.items()):
@@ -254,6 +270,8 @@ class RosSource:
         decode = role in DECODED_ROLES
         throttled = role not in UNTHROTTLED_ROLES and role != "tf"
         handler = self._handler_for(role, type_str)
+        if role == "status_flag":
+            handler = lambda m, now, _name=name: self._on_flag(_name, m, now)  # noqa: E731
 
         def cb(raw: Any) -> None:
             now = time.monotonic()
@@ -310,6 +328,8 @@ class RosSource:
             return self._on_diagnostics
         if role == "cmd_vel":
             return self._on_cmd_vel
+        if role == "status_flag":
+            return lambda m, now, _short=short: None  # replaced per topic in _make_callback
         return None
 
     # helpers --------------------------------------------------------------
@@ -435,6 +455,11 @@ class RosSource:
                 del self.diag_items[k]
         items = [{k: v for k, v in it.items() if k != "rx"} for it in self.diag_items.values()]
         set_diagnostics(self.store, items)
+
+    def _on_flag(self, name: str, msg: Any, now: float) -> None:
+        st = self.store.topics.get(name)
+        if st is not None:
+            st.flag_value = bool(msg.data)
 
     def _on_cmd_vel(self, msg: Any, now: float) -> None:
         tw = msg.twist if hasattr(msg, "twist") else msg

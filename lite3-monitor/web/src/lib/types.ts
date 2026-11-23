@@ -109,6 +109,10 @@ export interface TopicHealth {
   publisher_nodes: string[];
   status: TopicStatus;
   note: string;
+  /** For role "status_flag": last std_msgs/Bool value from the robot (null = none yet). */
+  value?: boolean | null;
+  /** Display label for status flags, e.g. "IMU". */
+  label?: string | null;
 }
 
 export interface DiagnosticItem {
