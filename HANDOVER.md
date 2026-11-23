@@ -26,17 +26,24 @@ work session so the next human or agent (e.g. Codex) can continue.
 
 Agents: do not perform an action until its row says YES.
 
+## Known robot facts (confirmed by the team, 2026-11-23)
+
+- NUC hostname: `group8` · `ROS_DOMAIN_ID=8` (set in the team's shell environment,
+  not visible to non-interactive SSH shells) · RMW: default · Python 3.10.12 ·
+  workspace `~/lite3_ws` · NUC has internet (pip install possible).
+- SSH from the team's Mac works. IP address and username are kept only in each
+  laptop's git-ignored `scripts/*/robot.env`, never in this repo.
+
 ## Open questions for the team
 
-1. NUC IP/hostname on the school Wi-Fi, SSH user, and the NUC's `hostname` output.
-2. Our `ROS_DOMAIN_ID` (if it is the default 0, other robots on the Wi-Fi may share
-   it — consider asking the team to set a unique one; this project will not change it).
-3. `RMW_IMPLEMENTATION` and whether `ROS_LOCALHOST_ONLY` is used.
+1. ~~NUC address, user, hostname~~ — answered (see Known robot facts).
+2. ~~`ROS_DOMAIN_ID`~~ — answered: 8.
+3. ~~`RMW_IMPLEMENTATION`~~ — default. Whether `ROS_LOCALHOST_ONLY` is used: still unknown.
 4. Which SLAM (slam_toolbox / cartographer / other), navigation (Nav2?) and
    exploration (explore_lite / custom) packages run, and their topic names.
 5. Odometry topic and type: `/odom`, `/leg_odom`, `/leg_odom2`? Body frame name
    (`base_link`, `base`, `body`, `trunk`)?
-6. Does the NUC have internet access for `pip install`? Python version?
+6. ~~Internet / Python~~ — answered: yes, 3.10.12.
 7. Arena area in m² (to report coverage % instead of explored area).
 8. Any custom message types in `lite3_ws` that carry useful state (battery, gait, mode)?
 
@@ -120,3 +127,12 @@ _(empty — to be filled by the reviewer)_
   in this container) — verified via the Windows CI job: run 44934186211 passed
   (parse, install.ps1, robot.env parsing, bridge tests, web build, smoke test).
   Not yet tried on a team-mate's actual laptop.
+- 2026-11-23 · Claude Code · Team confirmed hostname `group8`, domain 8. Fixed a
+  discovery bug found before first use: the remote discovery shell is
+  non-interactive, so `~/.bashrc` (where the team sets ROS_DOMAIN_ID) is not loaded
+  and discovery would have inspected domain 0. Both `discover-remote.sh` and
+  `.ps1` now export `ROS_DOMAIN_ID` from `EXPECTED_DOMAIN_ID` in robot.env (required)
+  and abort unless the remote `hostname` equals `EXPECTED_HOSTNAME`.
+  Note for start-bridge: the bridge already refuses to start if ROS_DOMAIN_ID does
+  not match `identity.expected_ros_domain_id`, so it must be run from a shell where
+  the team's environment is loaded (or with `ROS_DOMAIN_ID=8` exported).
