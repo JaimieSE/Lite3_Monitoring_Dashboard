@@ -225,3 +225,44 @@ def test_several_viewers_at_once_and_limit():
                 assert len(app.state.broadcaster.clients) == 3
     finally:
         src.stop()
+
+
+def test_group8_profile_stacks_and_tf_optional():
+    cfg = load_config([str(ROOT / "bridge" / "config" / "group8.yaml")])
+    assert cfg["identity"]["expected_hostname"] == "group8" and cfg["identity"]["expected_ros_domain_id"] == 8
+    assert cfg["layers"]["map"]["enabled"] is False and cfg["frames"]["tf_required"] is False
+    assert cfg["topics"]["odometry"]["candidates"][0] == "/leg_odom2"  # defaults still present
+    store = TelemetryStore(cfg, "ros")
+    store.odom = {"x": 1.0, "y": 2.0, "yaw": 0.0, "frame": "odom", "vx": 0.1, "vy": 0.0, "wz": 0.0,
+                  "rx": time.monotonic()}
+    snap = store.pose_snapshot(time.monotonic())
+    assert snap["pose"]["source"] == "odometry" and snap["pose"]["valid"]
+    assert snap["tf"]["ok"] and not snap["tf"]["errors"] and snap["tf"]["notes"]
+    # with TF required (default), the same situation is a TF fault
+    store2 = TelemetryStore(load_config(), "ros")
+    store2.odom = dict(store.odom)
+    assert not store2.pose_snapshot(time.monotonic())["tf"]["ok"]
+
+
+def test_sim_odom_only_behaves_like_group8():
+    from lite3_bridge.sim import SimSource
+    cfg = load_config([str(ROOT / "bridge" / "config" / "group8.yaml")])
+    cfg["sim"]["topic_faults"] = False
+    store = TelemetryStore(cfg, "sim")
+    src = SimSource(store, cfg)
+    src._register()
+    now = 1000.0
+    for _ in range(int(30 / src.DT)):
+        now += src.DT
+        src.tick(now)
+    tel = store.telemetry_message()
+    assert tel["pose"]["source"] == "odometry" and tel["pose"]["frame"] == "odom"
+    assert tel["tf"]["ok"] and store.map_raw is None and store.goal is None
+    assert tel["exploration"]["distance_travelled_m"] >= 0
+    assert store.paths_message()["trail"]["frame"] == "odom"
+    h = store.health_message({})
+    health = {t["name"]: t for t in h["topics"]}
+    # roles the robot does not have are switched off in the profile: no MISSING noise
+    assert "/map" not in health and "/scan" not in health and h["missing_roles"] == []
+    assert not any(t["status"] in ("error", "missing") for t in h["topics"]), h["topics"]
+    assert health["/sensor_status/imu_isalive"]["value"] is True

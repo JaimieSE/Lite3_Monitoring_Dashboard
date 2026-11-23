@@ -175,3 +175,14 @@ _(empty — to be filled by the reviewer)_
   Simulator now emits rates from config and the flags (IMU flag false during the
   IMU fault). 28 bridge tests, typecheck, build, read-only audit pass; browser check
   of the chips against the simulator. Blocked on open question 9 for map/nav data.
+- 2026-11-23 · Claude Code · Team decision: run WITHOUT the map. New robot profile
+  `bridge/config/group8.yaml` (identity group8/8, `layers.map.enabled: false`,
+  `frames.tf_required: false`, absent roles' candidates emptied so nothing is
+  reported missing). `--config` can be repeated (default → profile → local.yaml);
+  `scripts/nuc/start-bridge.sh` loads `config/$LITE3_PROFILE.yaml` (default group8).
+  TF optional: odometry pose without TF is a note, not a fault (`tf.required`,
+  `tf.notes` in telemetry). Dashboard draws trail/robot in the pose frame when there
+  is no map, fits to the trail, panel reads "Live position (no map)". Simulator
+  `odom_only` (via the profile) mimics group8. `start-sim --profile group8` /
+  `-Profile group8`. 30 bridge tests, typecheck, build, audit; browser check: clean
+  event log, trail fitted, TF "not used", sensor chips green.

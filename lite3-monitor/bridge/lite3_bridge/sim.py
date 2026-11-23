@@ -255,6 +255,9 @@ class SimSource:
         self.dropout_every = float(scfg.get("link_dropout_every_s", 90))
         self.dropout_dur = float(scfg.get("link_dropout_duration_s", 6))
         self.link_down_until = 0.0
+        # odom_only: behave like a robot whose ROS domain carries odometry but no TF,
+        # map or navigation topics (group8). The robot still explores internally.
+        self.odom_only = bool(scfg.get("odom_only", False))
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.rng = random.Random(self.seed)
@@ -301,6 +304,14 @@ class SimSource:
                              decoded=role not in ("scan", "imu", "joint_states", "tf_static"),
                              publisher_nodes=[self._publisher_for(role)])
             s.roles[role] = name
+        if self.odom_only:
+            # /tf exists on such robots (static frames only), so it stays registered but idle.
+            for role in ("map", "scan", "global_plan", "local_plan", "goal", "nav_status", "frontiers",
+                         "diagnostics", "cmd_vel"):
+                name = self._role_name(role)
+                if name in s.topics:
+                    del s.topics[name]
+                s.roles[role] = None
         for extra in self.cfg.get("extra_health_topics") or []:
             s.register_topic("extra", extra["name"], expected_hz=extra.get("expected_hz"),
                              min_hz=extra.get("min_hz"), available=True, subscribed=True, publishers=1,
@@ -456,6 +467,8 @@ class SimSource:
         yaw = math.atan2(goal[1] - self.y, goal[0] - self.x)
         s = self.store
         now = time.monotonic()
+        if self.odom_only:
+            return
         with s.lock:
             s.goal = {"x": goal[0], "y": goal[1], "yaw": yaw, "frame": "map", "rx": now}
             s.nav_status = {"status": "EXECUTING", "rx": now}
@@ -467,6 +480,8 @@ class SimSource:
             return
         self.goal = None
         self.path = []
+        if self.odom_only:
+            return
         with self.store.lock:
             self.store.nav_status = {"status": status, "rx": time.monotonic()}
         self.store.topic_rx(self._role_name("nav_status") or "/nav_status")
@@ -560,14 +575,17 @@ class SimSource:
         with s.lock:
             s.odom = {"x": ox, "y": oy, "yaw": oyaw, "frame": "odom",
                       "vx": self.v + noise(0, 0.01), "vy": noise(0, 0.005), "wz": self.w + noise(0, 0.01), "rx": now}
-            s.cmd_vel = {"linear": self.cmd[0], "angular": self.cmd[1], "rx": now}
-        if not self._has_fault("tf_stale"):
-            s.set_tf("map", "odom", (dx, dy, 0.0), quat_from_yaw(dth), static=False, now=now)
-        s.set_tf("odom", "base_link", (ox, oy, 0.32), quat_from_yaw(oyaw), static=False, now=now)
+            if not self.odom_only:
+                s.cmd_vel = {"linear": self.cmd[0], "angular": self.cmd[1], "rx": now}
+        if not self.odom_only:
+            if not self._has_fault("tf_stale"):
+                s.set_tf("map", "odom", (dx, dy, 0.0), quat_from_yaw(dth), static=False, now=now)
+            s.set_tf("odom", "base_link", (ox, oy, 0.32), quat_from_yaw(oyaw), static=False, now=now)
         n = self._role_name
         # Rates follow the configured expected_hz (group8 publishes odom/IMU/joints at 200 Hz).
         self._count("odometry", None, now)
-        s.topic_rx(n("tf") or "/tf", 3, now)                                       # ~60 Hz
+        if not self.odom_only:
+            s.topic_rx(n("tf") or "/tf", 3, now)                                   # ~60 Hz
         s.topic_rx(n("cmd_vel") or "/cmd_vel", 1, now)                             # 20 Hz
         self._count("joint_states", None, now)
         self._count("imu", 0.2 if self._has_fault("imu_degraded") else None, now)  # fault: 20 % rate
@@ -591,6 +609,8 @@ class SimSource:
             self.store.topic_rx(name, whole, now)
 
     def _publish_map(self) -> None:
+        if self.odom_only:
+            return
         s = self.store
         with s.lock:
             s.map_raw = {"data": bytes(self.explorer.known), "width": W, "height": H, "resolution": RES,
@@ -599,6 +619,8 @@ class SimSource:
         s.topic_rx(self._role_name("map") or "/map")
 
     def _publish_paths(self) -> None:
+        if self.odom_only:
+            return
         s = self.store
         now = time.monotonic()
         if self.path:
@@ -613,6 +635,8 @@ class SimSource:
             s.topic_rx(self._role_name("local_plan") or "/local_plan")
 
     def _publish_frontiers(self, centroids: List[Tuple[float, float]]) -> None:
+        if self.odom_only:
+            return
         s = self.store
         with s.lock:
             s.frontiers = {"count": len(centroids), "points": [[round(x, 2), round(y, 2)] for x, y in centroids],
@@ -629,6 +653,8 @@ class SimSource:
             self.store.topic_rx(flag["name"], 2)  # called at 1 Hz -> 2 msgs/s like the robot
 
     def _publish_diag(self) -> None:
+        if self.odom_only:
+            return
         s = self.store
         self.battery = max(5.0, self.battery - 0.01)
         items = [

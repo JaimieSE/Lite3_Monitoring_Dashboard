@@ -47,6 +47,7 @@ cd lite3-monitor
 ./scripts/mac/start-sim.sh        # simulator bridge + dashboard → http://127.0.0.1:3000
 ./scripts/mac/start-sim.sh --dropouts   # also simulate Wi-Fi loss to see TELEMETRY LOST
 ./scripts/mac/start-sim.sh --latency 150   # emulate a slow link (150 ms each way)
+./scripts/mac/start-sim.sh --profile group8   # behave like our robot: no map, pose from odometry
 ```
 
 Manual equivalent:
@@ -107,7 +108,7 @@ Mac; details (summary, trajectory, events, speed/area/rate charts), compare up t
 
 | What | Where |
 |---|---|
-| Topic candidates, rates, staleness thresholds, frames, identity, arena area | `bridge/config/default.yaml`, overridden by `--config local.yaml` |
+| Topic candidates, rates, staleness thresholds, frames, identity, arena area | `bridge/config/default.yaml`, then a robot profile (`config/group8.yaml`), then optional `config/local.yaml` — stack them with repeated `--config` |
 | Bridge URL, expected hostname / domain for the dashboard | `web/.env.local` (`LITE3_*`, read at runtime by `/api/config`) |
 | Tunnel + NUC details | `scripts/mac/robot.env` |
 

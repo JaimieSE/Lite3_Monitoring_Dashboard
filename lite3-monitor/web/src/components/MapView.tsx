@@ -116,10 +116,18 @@ export function MapView() {
     const live = client.poseLive;
 
     if (map && v.autoFit && v.fittedVersion !== map.version) fit();
-    // Without a grid (map stream off) "fit" keeps the robot in view instead.
+    // Without a grid (no map / map stream off) "fit" frames the trail and the robot.
     if (!map && v.autoFit && pose) {
-      v.cx = pose.x;
-      v.cy = pose.y;
+      const pts: [number, number][] = [[pose.x, pose.y]];
+      if (paths?.trail.frame === pose.frame) pts.push(...paths.trail.points);
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const [x, y] of pts) {
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+      }
+      const w = Math.max(x1 - x0, 4), h = Math.max(y1 - y0, 4); // at least 4 m across
+      v.scale = Math.max(4, Math.min(120, 0.8 * Math.min(W / w, H / h)));
+      v.cx = (x0 + x1) / 2;
+      v.cy = (y0 + y1) / 2;
     }
     if (v.follow && pose && pose.map_frame) {
       v.cx = pose.x;
@@ -166,7 +174,9 @@ export function MapView() {
       ctx.strokeStyle = "rgba(12,163,12,0.7)"; ctx.stroke();
     }
 
-    const mapFrame = client.hello?.frames.map ?? "map";
+    // Draw in the map frame when there is a map; otherwise in the robot pose's own
+    // frame (e.g. "odom" for robots running without a map).
+    const mapFrame = map ? (client.hello?.frames.map ?? "map") : (pose?.frame ?? client.hello?.frames.map ?? "map");
     const polyline = (pts: [number, number][], color: string, width: number, dash: number[] = []) => {
       if (pts.length < 2) return;
       ctx.beginPath();
@@ -388,11 +398,11 @@ export function MapView() {
         <LegendRow swatch={<span className="inline-block h-0.5 w-3.5 bg-s7" />} label="Trail" />
         <LegendRow swatch={<span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-s3" />} label="Frontier" />
         <LegendRow swatch={<span className="inline-block h-2.5 w-2.5 rounded-full border-2 border-s5" />} label="Nav goal" />
-        <div className="mt-1 flex items-center gap-1.5 border-t border-line pt-1">
+        {map ? <div className="mt-1 flex items-center gap-1.5 border-t border-line pt-1">
           <span className="inline-block h-2.5 w-2.5 bg-[rgb(38,50,64)]" /> free
           <span className="ml-1 inline-block h-2.5 w-2.5 bg-[rgb(222,228,236)]" /> occupied
           <span className="ml-1 inline-block h-2.5 w-2.5 border border-line bg-[rgb(14,17,22)]" /> unknown
-        </div>
+        </div> : null}
       </div>
 
       {/* banners */}
@@ -426,6 +436,8 @@ export function MapView() {
               map {map.width}×{map.height} @ {fmt(map.resolution, 2)} m · v{map.version} · age{" "}
               <span className={client.health?.map?.stale ? "text-warn" : ""}>{fmtAge(mapAge)}</span>
             </>
+          ) : !client.health?.map ? (
+            <>no map · position from {client.telemetry?.pose?.source ?? "—"} in frame {client.telemetry?.pose?.frame ?? "—"}</>
           ) : client.mapLink === "off" || client.mapLink === "disabled" ? (
             <>
               map stream {client.mapLink} · SLAM map v{client.health?.map?.version ?? "—"} · explored{" "}

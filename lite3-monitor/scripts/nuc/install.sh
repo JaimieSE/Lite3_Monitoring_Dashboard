@@ -11,10 +11,9 @@ read -r -p "Proceed? [y/N] " a; [[ "$a" =~ ^[Yy]$ ]] || exit 1
 python3 -m venv --system-site-packages "$VENV"
 "$VENV/bin/pip" install --quiet -r "$DIR/bridge/requirements.txt"
 [ -f "$DIR/bridge/config/local.yaml" ] || cat > "$DIR/bridge/config/local.yaml" <<'YAML'
-# NUC-local overrides (merged over default.yaml). Fill identity after discovery.
-identity:
-  robot_name: "Lite3"
-  expected_hostname: ""        # `hostname` of THIS NUC
-  expected_ros_domain_id: null # our ROS_DOMAIN_ID
+# NUC-local overrides, merged after default.yaml and the robot profile
+# (config/group8.yaml). Identity, map and TF settings already come from the profile;
+# put only machine-specific tweaks here.
+{}
 YAML
-echo "Done. Edit $DIR/bridge/config/local.yaml, then run scripts/nuc/start-bridge.sh"
+echo "Done. Run scripts/nuc/start-bridge.sh (uses config/group8.yaml; optional tweaks in config/local.yaml)"

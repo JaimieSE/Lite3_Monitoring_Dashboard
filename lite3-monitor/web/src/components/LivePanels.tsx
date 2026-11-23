@@ -128,7 +128,11 @@ export function TfDiagPanel({ className = "" }: { className?: string }) {
   return (
     <Panel
       title="TF & diagnostics"
-      right={<StatusPill level={!tf ? "idle" : tf.ok ? "good" : "warn"}>{!tf ? "no tf" : tf.ok ? "tf ok" : "tf issue"}</StatusPill>}
+      right={
+        <StatusPill level={!tf ? "idle" : tf.required === false && tf.chain.length === 0 ? "idle" : tf.ok ? "good" : "warn"}>
+          {!tf ? "no tf" : tf.required === false && tf.chain.length === 0 ? "tf not used" : tf.ok ? "tf ok" : "tf issue"}
+        </StatusPill>
+      }
       bodyClass="overflow-auto scroll-thin"
       className={className}
     >
@@ -165,6 +169,9 @@ export function TfDiagPanel({ className = "" }: { className?: string }) {
         </div>
         {tf?.errors.map((e) => (
           <div key={e} className="mt-1 text-warn">▲ {e}</div>
+        ))}
+        {tf?.notes?.map((e) => (
+          <div key={e} className="mt-1 text-faint">● {e}</div>
         ))}
       </div>
       <div className="border-t border-line px-3 py-2 text-2xs">

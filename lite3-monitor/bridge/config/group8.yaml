@@ -1,0 +1,41 @@
+# Robot profile: team group8 (hostname group8, ROS_DOMAIN_ID 8).
+# Merged over default.yaml:  --config config/group8.yaml [--config config/local.yaml]
+#
+# Discovery 2026-11-23 (docs/discovery/discovery-20261123-151619.md): domain 8 is fed
+# by /lite3_domain_bridge_8 and carries odometry, IMU, joints, sensors and "is alive"
+# flags, but no /map, no dynamic /tf and no navigation topics. The team chose to run
+# WITHOUT the map: pose comes from /leg_odom2 in its odometry frame.
+
+identity:
+  robot_name: "Lite3 group8"
+  expected_hostname: "group8"
+  expected_ros_domain_id: 8
+
+frames:
+  # No dynamic TF on domain 8: the odometry pose is the intended source, so missing
+  # TF chains are shown as notes, not as faults.
+  tf_required: false
+
+layers:
+  map:
+    # No /map on domain 8 and the team runs without it. Set true to re-enable if the
+    # map topic becomes available (e.g. bridged into domain 8).
+    enabled: false
+
+sim:
+  # ./scripts/mac/start-sim.sh --profile group8 : simulator behaves like group8
+  # (odometry only: no TF, map or navigation topics).
+  odom_only: true
+
+# Roles that do not exist on domain 8: no candidates => not subscribed and not
+# reported as missing. Restore candidates here if these topics are bridged later.
+topics:
+  map: {candidates: []}
+  scan: {candidates: []}
+  global_plan: {candidates: []}
+  local_plan: {candidates: []}
+  goal: {candidates: []}
+  nav_status: {candidates: []}
+  frontiers: {candidates: []}
+  diagnostics: {candidates: []}
+  cmd_vel: {candidates: []}

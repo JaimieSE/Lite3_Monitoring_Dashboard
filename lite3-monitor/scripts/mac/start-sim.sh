@@ -6,6 +6,7 @@
 #   ./scripts/mac/start-sim.sh --no-faults
 #   ./scripts/mac/start-sim.sh --latency 150   # emulate 150 ms one-way Wi-Fi delay
 #   ./scripts/mac/start-sim.sh --no-map        # bridge never streams the grid
+#   ./scripts/mac/start-sim.sh --profile group8  # behave like our robot (no map / TF)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEV=0
@@ -15,6 +16,7 @@ while [ $# -gt 0 ]; do
   case "$a" in
     --latency) BRIDGE_ARGS+=(--sim-latency-ms "$1"); shift ;;
     --no-map) BRIDGE_ARGS+=(--no-map-stream) ;;
+    --profile) BRIDGE_ARGS+=(--config "config/$1.yaml"); shift ;;
     --dev) DEV=1 ;;
     --dropouts) BRIDGE_ARGS+=(--sim-link-dropouts) ;;
     --no-faults) BRIDGE_ARGS+=(--sim-no-faults) ;;

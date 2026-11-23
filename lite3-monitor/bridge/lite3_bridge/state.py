@@ -224,6 +224,14 @@ class TelemetryStore:
                 "source": "odometry",
                 "age_s": now - o["rx"],
             }
+        tf_required = bool(frames.get("tf_required", True))
+        tf_info["required"] = tf_required
+        tf_info["notes"] = []
+        if not tf_required and pose is not None and pose["source"] == "odometry":
+            # Robot without dynamic TF (e.g. group8 domain 8): odometry pose is the
+            # intended source, so missing TF chains are information, not a fault.
+            tf_info["notes"] = tf_info["errors"] + ["pose from odometry (TF not required)"]
+            tf_info["errors"] = []
         tf_info["ok"] = not tf_info["errors"]
         if pose is not None:
             pose["valid"] = pose["age_s"] <= stale_s

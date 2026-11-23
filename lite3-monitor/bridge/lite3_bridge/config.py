@@ -9,7 +9,7 @@ import copy
 import ipaddress
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -27,10 +27,14 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return out
 
 
-def load_config(path: Optional[str] = None) -> Dict[str, Any]:
+def load_config(paths: Union[None, str, List[str]] = None) -> Dict[str, Any]:
+    """default.yaml, then each given file merged on top in order
+    (e.g. a robot profile such as config/group8.yaml, then config/local.yaml)."""
     with open(DEFAULT_CONFIG_PATH, "r", encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh) or {}
-    if path:
+    if isinstance(paths, str):
+        paths = [paths]
+    for path in paths or []:
         with open(path, "r", encoding="utf-8") as fh:
             user = yaml.safe_load(fh) or {}
         cfg = _deep_merge(cfg, user)

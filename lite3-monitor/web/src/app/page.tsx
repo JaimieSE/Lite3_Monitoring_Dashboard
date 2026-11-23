@@ -11,8 +11,13 @@ export default function LivePage() {
     <div className="flex flex-col gap-2">
       <div className="grid grid-cols-12 gap-2">
         <Panel
-          title="Live SLAM map"
-          right={<span className="text-2xs text-faint">frame {client.hello?.frames.map ?? "map"}</span>}
+          title={client.map ? "Live SLAM map" : "Live position (no map)"}
+          right={
+            <span className="text-2xs text-faint">
+              frame {client.map ? (client.hello?.frames.map ?? "map") : (client.telemetry?.pose?.frame ?? "—")}
+              {client.telemetry?.pose ? ` · pose via ${client.telemetry.pose.source}` : ""}
+            </span>
+          }
           className="col-span-12 h-[calc(100vh-112px)] min-h-[520px] lg:col-span-8"
         >
           <MapView />

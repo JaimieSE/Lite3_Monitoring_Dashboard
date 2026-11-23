@@ -13,6 +13,11 @@ if [ -f "$LITE3_WS/install/setup.bash" ]; then source "$LITE3_WS/install/setup.b
 set -u
 
 echo "hostname=$(hostname) ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-unset(0)} RMW=${RMW_IMPLEMENTATION:-default}"
-CONFIG="$DIR/bridge/config/local.yaml"
+# Robot profile (config/<profile>.yaml) then optional NUC-local overrides.
+PROFILE="${LITE3_PROFILE:-group8}"
+CONFIG_ARGS=(--config "config/$PROFILE.yaml")
+[ -f "$DIR/bridge/config/local.yaml" ] && CONFIG_ARGS+=(--config "config/local.yaml")
 cd "$DIR/bridge"
-exec nice -n 10 "$DIR/.venv/bin/python" -m lite3_bridge --config "$CONFIG" "$@"
+[ -f "config/$PROFILE.yaml" ] || { echo "No profile config/$PROFILE.yaml" >&2; exit 1; }
+echo "profile=$PROFILE"
+exec nice -n 10 "$DIR/.venv/bin/python" -m lite3_bridge "${CONFIG_ARGS[@]}" "$@"

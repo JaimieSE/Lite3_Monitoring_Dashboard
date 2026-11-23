@@ -39,8 +39,11 @@ NUC is marked 🔒 and needs explicit approval at that time.
    `~/lite3-monitor/.venv` with `--system-site-packages` and pip-installs
    `fastapi uvicorn websockets PyYAML`. No sudo, no apt, nothing system-wide.
    If the NUC has no internet, wheels can be copied from the Mac (`pip download`).
-6. Edit `~/lite3-monitor/bridge/config/local.yaml`: `expected_hostname`,
-   `expected_ros_domain_id` (the bridge then refuses to run anywhere else).
+6. Identity (`group8`, domain 8), map off and TF not required come from the
+   profile `bridge/config/group8.yaml`, which `start-bridge.sh` loads by default
+   (`LITE3_PROFILE` selects another). `config/local.yaml` is only for NUC-specific
+   tweaks. The bridge refuses to run unless hostname = group8 and ROS_DOMAIN_ID = 8,
+   so start it from a shell where the team environment (domain 8) is loaded.
 7. 🔒 **Run** — in `tmux`: `~/lite3-monitor/scripts/nuc/start-bridge.sh`. Check the log
    line `read-only audit passed … 0 publishers, 0 services, 0 clients`.
 8. On the Mac: set `EXPECTED_HOSTNAME`/`EXPECTED_DOMAIN_ID` in `robot.env`, run

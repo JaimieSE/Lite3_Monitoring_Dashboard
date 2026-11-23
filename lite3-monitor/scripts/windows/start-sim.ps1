@@ -1,6 +1,6 @@
 # Run the full dashboard on Windows against the built-in simulator (no robot).
-#   powershell -ExecutionPolicy Bypass -File scripts\windows\start-sim.ps1 [-Dev] [-Dropouts] [-NoFaults] [-LatencyMs 150] [-NoMap]
-param([switch]$Dev, [switch]$Dropouts, [switch]$NoFaults, [int]$LatencyMs = 0, [switch]$NoMap)
+#   powershell -ExecutionPolicy Bypass -File scripts\windows\start-sim.ps1 [-Dev] [-Dropouts] [-NoFaults] [-LatencyMs 150] [-NoMap] [-Profile group8]
+param([switch]$Dev, [switch]$Dropouts, [switch]$NoFaults, [int]$LatencyMs = 0, [switch]$NoMap, [string]$Profile = "")
 . (Join-Path $PSScriptRoot "_common.ps1")
 
 $vpy = Venv-Python
@@ -11,6 +11,10 @@ if ($Dropouts) { $bridgeArgs += "--sim-link-dropouts" }
 if ($NoFaults) { $bridgeArgs += "--sim-no-faults" }
 if ($LatencyMs -gt 0) { $bridgeArgs += @("--sim-latency-ms", "$LatencyMs") }
 if ($NoMap) { $bridgeArgs += "--no-map-stream" }
+if ($Profile) {
+    if (-not (Test-Path (Join-Path $Root "bridge\config\$Profile.yaml"))) { Fail "No profile bridge\config\$Profile.yaml" }
+    $bridgeArgs += @("--config", "config/$Profile.yaml")
+}
 
 $env:LITE3_BRIDGE_WS_URL = "ws://127.0.0.1:8765/ws"
 $bridge = $null

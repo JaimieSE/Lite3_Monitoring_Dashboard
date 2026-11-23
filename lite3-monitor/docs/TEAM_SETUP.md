@@ -35,7 +35,11 @@ winget install OpenJS.NodeJS.LTS Python.Python.3.12 Git.Git   # then reopen Powe
 powershell -ExecutionPolicy Bypass -File scripts\windows\install.ps1
 powershell -ExecutionPolicy Bypass -File scripts\windows\start-sim.ps1
 ```
-`start-sim.ps1` options: `-Dev`, `-Dropouts`, `-NoFaults`, `-LatencyMs 150`, `-NoMap`.
+`start-sim.ps1` options: `-Dev`, `-Dropouts`, `-NoFaults`, `-LatencyMs 150`, `-NoMap`, `-Profile group8`.
+
+**Our robot runs without a map** (profile `group8`): position comes from leg odometry,
+there are no paths/goals/frontiers, and TF is not required. Preview exactly that with
+`start-sim.sh --profile group8` / `start-sim.ps1 -Profile group8`.
 
 Live robot: fill `scripts\windows\robot.env` (created by install), then
 ```powershell

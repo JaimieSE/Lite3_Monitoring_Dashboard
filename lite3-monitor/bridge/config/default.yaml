@@ -54,6 +54,8 @@ frames:
   odom: "odom"
   # Candidates for the robot body frame; the first one present in TF wins.
   base: ["base_link", "base", "body", "base_footprint", "trunk"]
+  # false: robots without dynamic TF (pose from odometry) do not get TF warnings.
+  tf_required: true
 
 staleness:
   pose_stale_s: 1.0     # pose older than this is never shown as live

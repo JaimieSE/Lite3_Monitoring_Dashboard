@@ -90,7 +90,16 @@ export interface TelemetryMsg {
   cmd_vel: { linear: number | null; angular: number | null; age_s: number | null } | null;
   nav: NavInfo;
   exploration: Exploration;
-  tf: { base_frame: string | null; chain: TfEdgeInfo[]; errors: string[]; ok: boolean };
+  tf: {
+    base_frame: string | null;
+    chain: TfEdgeInfo[];
+    errors: string[];
+    ok: boolean;
+    /** false = robot without dynamic TF; pose comes from odometry by design. */
+    required?: boolean;
+    /** informational messages when TF is not required */
+    notes?: string[];
+  };
 }
 
 export type TopicStatus = "ok" | "warn" | "error" | "missing" | "idle";

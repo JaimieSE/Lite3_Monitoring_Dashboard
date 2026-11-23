@@ -79,7 +79,9 @@ def check_identity(cfg: dict) -> None:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="lite3_bridge", description="Read-only Lite3 telemetry bridge")
     ap.add_argument("--sim", action="store_true", help="run the built-in simulator instead of ROS 2")
-    ap.add_argument("--config", help="YAML file merged over config/default.yaml")
+    ap.add_argument("--config", action="append",
+                    help="YAML file merged over config/default.yaml; repeat to stack files "
+                         "(e.g. --config config/group8.yaml --config config/local.yaml)")
     ap.add_argument("--host", help="override server.host")
     ap.add_argument("--port", type=int, help="override server.port")
     ap.add_argument("--allow-remote-bind", action="store_true",
