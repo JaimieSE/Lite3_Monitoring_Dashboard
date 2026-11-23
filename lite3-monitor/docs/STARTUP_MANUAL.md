@@ -154,7 +154,7 @@ Recorded sessions stay on your laptop: **History** tab → export **JSON / CSV**
 | `REFUSING TO START: ROS_DOMAIN_ID=0 != expected 8` | Your shell does not have the team environment. In tmux run `export ROS_DOMAIN_ID=8` (or open a fresh SSH login) and start again. |
 | `REFUSING TO START: hostname … != expected 'group8'` | You are logged into the wrong computer. Check the IP. |
 | **IDENTITY MISMATCH** (red) in the dashboard | Your `robot.env` says another hostname/domain than the bridge reports. Fix `EXPECTED_HOSTNAME=group8`, `EXPECTED_DOMAIN_ID=8`. |
-| Laptop window: `bind ... 8765: Address already in use` | Another tunnel is already open on your laptop (old window). Close it, or stop it: Mac `pkill -f "8765:127.0.0.1:8765"`. |
+| Laptop window: `bind ... 8765: Address already in use`, password asked again and again | Port 8765 on your laptop is taken by an old tunnel or the simulator. Mac: `pkill -f "8765:127.0.0.1:8765"; pkill -f "lite3_bridge --sim"`. Windows: `Get-NetTCPConnection -LocalPort 8765 -State Listen \| ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`. Then start again. (The start scripts now detect this and tell you.) |
 | Robot box does not move | Check System health: `/leg_odom2` must be green ≈ 200 Hz. If missing, the robot's driver / domain bridge on the NUC is not running. |
 | A sensor chip is red (**NOT alive**) | The robot itself reports that sensor as dead — check the robot, not the monitor. |
 | **delay** amber/orange, spikes | Busy Wi-Fi. Fewer viewers, move closer to the access point. |

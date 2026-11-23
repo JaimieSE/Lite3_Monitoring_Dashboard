@@ -11,6 +11,22 @@ $env:LITE3_EXPECTED_HOSTNAME = "$($cfg['EXPECTED_HOSTNAME'])"
 $env:LITE3_EXPECTED_DOMAIN_ID = "$($cfg['EXPECTED_DOMAIN_ID'])"
 if (-not $env:LITE3_EXPECTED_HOSTNAME) { Write-Host "WARNING: EXPECTED_HOSTNAME not set - robot identity will be shown as unverified." -ForegroundColor Yellow }
 
+# The tunnel needs LOCAL_PORT free on this PC. If something already listens there
+# (an old tunnel from a closed window, or the simulator), stop instead of looping.
+$busy = @(Get-NetTCPConnection -LocalPort ([int]$cfg["LOCAL_PORT"]) -State Listen -ErrorAction SilentlyContinue)
+if ($busy.Count -gt 0) {
+    Write-Host "Port $($cfg['LOCAL_PORT']) on this PC is already in use by:" -ForegroundColor Yellow
+    foreach ($b in $busy) {
+        $p = Get-Process -Id $b.OwningProcess -ErrorAction SilentlyContinue
+        Write-Host "   PID $($b.OwningProcess)  $($p.ProcessName)"
+    }
+    Write-Host ""
+    Write-Host "Usually an old tunnel (ssh) or the simulator (python). Stop it with:"
+    Write-Host "   Get-NetTCPConnection -LocalPort $($cfg['LOCAL_PORT']) -State Listen | ForEach-Object { Stop-Process -Id `$_.OwningProcess -Force }"
+    Write-Host "then run this script again."
+    exit 1
+}
+
 $web = $null
 try {
     Push-Location (Join-Path $Root "web")

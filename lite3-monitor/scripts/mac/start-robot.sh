@@ -7,6 +7,19 @@ source "$(dirname "$0")/_common.sh"
 LOCAL_PORT="${LOCAL_PORT:-8765}"
 REMOTE_PORT="${REMOTE_PORT:-8765}"
 
+# The tunnel needs LOCAL_PORT free on this laptop. If something already listens there
+# (an old tunnel from a closed window, or the simulator), stop instead of looping.
+if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "Port $LOCAL_PORT on this laptop is already in use by:"
+  lsof -nP -iTCP:"$LOCAL_PORT" -sTCP:LISTEN | sed 's/^/   /'
+  echo
+  echo "Usually an old tunnel or the simulator. Stop it with:"
+  echo "   pkill -f \"$LOCAL_PORT:127.0.0.1:$REMOTE_PORT\"     # old tunnel"
+  echo "   pkill -f \"lite3_bridge --sim\"               # simulator"
+  echo "then run this script again."
+  exit 1
+fi
+
 cleanup() { trap - EXIT INT TERM; kill 0 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
