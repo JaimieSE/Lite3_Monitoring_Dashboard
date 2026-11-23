@@ -13,6 +13,17 @@ else
 fi
 SSH_OPTS=(-p "${NUC_SSH_PORT:-22}" -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ConnectTimeout=8)
 
+# robot.env is sourced by bash, which expands "~" to THIS Mac's home. Paths meant for
+# the NUC must keep "~" so the NUC's shell expands it there.
+nuc_path() {
+  local p="$1"
+  case "$p" in
+    "$HOME"/*) printf '~/%s' "${p#"$HOME"/}" ;;
+    "$HOME") printf '~' ;;
+    *) printf '%s' "$p" ;;
+  esac
+}
+
 confirm() {
   read -r -p "$1 [y/N] " ans
   [[ "$ans" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 1; }

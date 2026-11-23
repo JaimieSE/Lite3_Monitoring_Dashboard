@@ -31,7 +31,17 @@ $web = $null
 try {
     Push-Location (Join-Path $Root "web")
     try {
-        if (-not (Test-Path ".next")) { & npm.cmd run build; if ($LASTEXITCODE -ne 0) { Fail "build failed" } }
+        # Rebuild when the code changed since the last build (e.g. after `git pull`).
+        $rev = "unknown"
+        try { $rev = (& git -C $Root rev-parse HEAD 2>$null) } catch { }
+        $built = ""
+        if (Test-Path ".next\lite3-build-rev") { $built = (Get-Content ".next\lite3-build-rev" -Raw).Trim() }
+        if (-not (Test-Path ".next") -or $built -ne "$rev") {
+            Write-Host "==> Building the dashboard for this version (1-2 min, only after updates)"
+            & npm.cmd ci --no-audit --no-fund --silent; if ($LASTEXITCODE -ne 0) { Fail "npm ci failed" }
+            & npm.cmd run build; if ($LASTEXITCODE -ne 0) { Fail "build failed" }
+            Set-Content -Path ".next\lite3-build-rev" -Value "$rev" -NoNewline
+        }
         $web = Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "start") -NoNewWindow -PassThru
     } finally { Pop-Location }
     Start-Sleep -Seconds 3

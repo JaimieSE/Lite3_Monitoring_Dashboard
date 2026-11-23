@@ -46,6 +46,21 @@ The NUC side (bridge install) is already done. Re-install only if the folder
 
 ## 1. Start-up (every session)
 
+### The one-command way (recommended)
+
+From the `lite3-monitor` folder on your laptop:
+
+| Mac | Windows (PowerShell) |
+|---|---|
+| `./scripts/mac/start-all.sh` | `powershell -ExecutionPolicy Bypass -File scripts\windows\start-all.ps1` |
+
+It (1) starts the bridge on the NUC in tmux - or leaves it alone if it is already
+running, so every team-mate can use it - (2) waits until the bridge answers,
+(3) opens the tunnel and the dashboard, and rebuilds the dashboard automatically
+after a `git pull`. Type the NUC password when asked (twice). Then do Step 3 below.
+
+The manual steps below do the same thing by hand.
+
 Do the steps in this order. The robot's own software can already be running or be
 started at any time — the monitor does not care about the order.
 

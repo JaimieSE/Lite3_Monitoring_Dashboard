@@ -106,3 +106,10 @@ jobs:
             taskkill /T /F /PID $web.Id | Out-Null
             taskkill /T /F /PID $bridge.Id | Out-Null
           }
+      - name: start-all.ps1 / start-robot.ps1 fail cleanly without a reachable NUC
+        working-directory: lite3-monitor
+        run: |
+          Set-Content scripts\windows\robot.env "NUC_HOST=203.0.113.1`nNUC_USER=nobody`nEXPECTED_HOSTNAME=group8`nEXPECTED_DOMAIN_ID=8"
+          $p = Start-Process powershell -ArgumentList "-ExecutionPolicy","Bypass","-File","scripts\windows\start-all.ps1" -PassThru -NoNewWindow -Wait
+          if ($p.ExitCode -eq 0) { throw "start-all should fail when the NUC is unreachable" }
+          Write-Host "start-all exited with $($p.ExitCode) as expected"

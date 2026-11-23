@@ -223,3 +223,15 @@ _(empty — to be filled by the reviewer)_
   it), throttling start/stop as two events (was one per second), temps + NUC CPU in
   recorded samples, history detail chart and summary/compare rows. 34 bridge tests,
   5 web tests, typecheck, build, audit; browser check through a simulated heat episode.
+- 2026-11-23 · Claude Code · One-command start (team request): `scripts/mac/start-all.sh`
+  and `scripts/windows/start-all.ps1` stream `scripts/nuc/ensure-bridge.sh` to the NUC
+  (`bash -s`): if `/healthz` answers, nothing is started; else the bridge is started in
+  tmux session `monitor` (new window if the session exists; nohup + ~/lite3-bridge.log
+  without tmux) with ROS_DOMAIN_ID from robot.env, waiting up to 25 s and printing the
+  bridge output on failure. It only manages lite3_bridge, never robot nodes. Then
+  start-robot runs. start-robot now rebuilds the dashboard when `git rev-parse HEAD`
+  differs from `.next/lite3-build-rev`, and refuses (with a fix) when the local tunnel
+  port is busy (team hit the endless password loop). Mac: `nuc_path` keeps `~` for
+  NUC paths sourced from robot.env (bash expanded them to the Mac home; also fixed in
+  discover-remote). ensure-bridge tested locally with tmux (start, healthy re-run);
+  PowerShell only via Windows CI.

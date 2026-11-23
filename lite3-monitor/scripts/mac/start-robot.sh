@@ -44,7 +44,12 @@ export LITE3_BRIDGE_WS_URL="ws://127.0.0.1:$LOCAL_PORT/ws"
 export LITE3_EXPECTED_HOSTNAME="${EXPECTED_HOSTNAME:-}"
 export LITE3_EXPECTED_DOMAIN_ID="${EXPECTED_DOMAIN_ID:-}"
 [ -n "$LITE3_EXPECTED_HOSTNAME" ] || echo "WARNING: EXPECTED_HOSTNAME not set - robot identity will be shown as unverified."
-[ -d .next ] || npm run build
+# Rebuild when the code changed since the last build (e.g. after `git pull`).
+REV="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ ! -d .next ] || [ "$(cat .next/lite3-build-rev 2>/dev/null)" != "$REV" ]; then
+  echo "==> Building the dashboard for this version (1-2 min, only after updates)"
+  npm ci --no-audit --no-fund --silent && npm run build && echo "$REV" > .next/lite3-build-rev
+fi
 npm run start &
 echo "==> Dashboard: http://127.0.0.1:3000   (Ctrl-C stops the tunnel and the dashboard only)"
 wait

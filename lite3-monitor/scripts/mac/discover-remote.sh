@@ -32,7 +32,7 @@ confirm "Proceed?"
   echo "if [ \"\$(hostname)\" != \"$EXPECTED_HOSTNAME\" ]; then echo \"WRONG MACHINE: \$(hostname) is not $EXPECTED_HOSTNAME - aborting\" >&2; exit 3; fi"
   echo 'source /opt/ros/humble/setup.bash >/dev/null 2>&1'
   echo "export ROS_DOMAIN_ID=$EXPECTED_DOMAIN_ID"
-  echo "WS=${NUC_LITE3_WS:-~/lite3_ws}"
+  echo "WS=$(nuc_path "${NUC_LITE3_WS:-~/lite3_ws}")"
   echo 'if [ -f "$WS/install/setup.bash" ]; then source "$WS/install/setup.bash" >/dev/null 2>&1; fi'
   echo 'echo "# hostname: $(hostname)  ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-unset}" >&2'
   echo "python3 - --seconds $SECONDS_ARG $HEAVY_ARG <<'__LITE3_DISCOVER_PY__'"
