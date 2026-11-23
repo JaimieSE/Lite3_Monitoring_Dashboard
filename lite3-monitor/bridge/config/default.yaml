@@ -69,6 +69,7 @@ exploration:
   min_trail_step_m: 0.10       # trail resolution
   max_trail_points: 2000
   jitter_threshold_m: 0.01     # ignore pose noise below this when summing distance
+  jump_threshold_m: 1.0        # pose change >= this within 1 s = estimate jump (not walking): no distance, trail break
   # Optional: area of the competition arena in m^2. When set, coverage % is
   # explored free area / arena area. Otherwise coverage is reported relative
   # to the map's known extent only.

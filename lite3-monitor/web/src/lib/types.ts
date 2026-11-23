@@ -70,6 +70,9 @@ export interface Exploration {
   stalled_for_s: number | null;
   stall_events: number;
   moving: boolean;
+  /** Sudden jumps of the position estimate (localisation / TF), excluded from distance. */
+  pose_jumps?: number;
+  last_jump?: { distance_m: number; age_s: number; from: [number, number]; to: [number, number] } | null;
 }
 
 export interface NavInfo {
@@ -203,7 +206,8 @@ export interface PathsMsg {
   global: PathData | null;
   local: PathData | null;
   frontiers: { count: number; points: [number, number][]; frame: string; age_s: number } | null;
-  trail: { frame: string | null; points: [number, number][] };
+  /** null entries are breaks (pose jumps): never draw a line across them. */
+  trail: { frame: string | null; points: ([number, number] | null)[] };
 }
 
 export interface MapStats {

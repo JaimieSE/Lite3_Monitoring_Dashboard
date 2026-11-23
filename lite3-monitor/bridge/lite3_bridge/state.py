@@ -90,7 +90,12 @@ class TelemetryStore:
 
         self.topics: Dict[str, TopicStat] = {}
         self.roles: Dict[str, Optional[str]] = {r: None for r in cfg["topics"]}
-        self.tf_edges: Dict[str, TfEdge] = {}  # keyed by child frame
+        # Moving (/tf) and fixed (/tf_static) transforms are kept apart, keyed by child
+        # frame. Some robots publish BOTH for the same child (e.g. a placeholder static
+        # map->base_link plus the real moving one); storing only "the latest" made the
+        # pose alternate between them.
+        self.tf_dynamic: Dict[str, TfEdge] = {}
+        self.tf_static_edges: Dict[str, TfEdge] = {}
         self.tf_dropped = 0
 
         self.odom: Optional[Dict[str, Any]] = None
@@ -142,12 +147,13 @@ class TelemetryStore:
                     continue
                 inst = st.window_count / dt
                 # light smoothing; reset quickly to zero when silent
-                st.rate_hz = inst if st.window_count == 0 else 0.5 * st.rate_hz + 0.5 * inst
+                # first reading (or after silence) is taken as-is, then lightly smoothed
+                st.rate_hz = inst if (st.window_count == 0 or st.rate_hz == 0) else 0.5 * st.rate_hz + 0.5 * inst
                 st.window_count = 0
                 if st.bytes_known:
                     binst = st.window_bytes / dt
                     prev = st.bytes_per_s or 0.0
-                    st.bytes_per_s = binst if st.window_bytes == 0 else 0.5 * prev + 0.5 * binst
+                    st.bytes_per_s = binst if (st.window_bytes == 0 or prev == 0) else 0.5 * prev + 0.5 * binst
                     st.window_bytes = 0
                 st.last_rate_calc = now
 
@@ -156,11 +162,41 @@ class TelemetryStore:
         parent = parent.lstrip("/")
         child = child.lstrip("/")
         with self.lock:
-            self.tf_edges[child] = TfEdge(parent, child, t, q, now if now is not None else time.monotonic(), static)
+            edge = TfEdge(parent, child, t, q, now if now is not None else time.monotonic(), static)
+            (self.tf_static_edges if static else self.tf_dynamic)[child] = edge
+
+    def _edge(self, child: str, now: float) -> Optional[TfEdge]:
+        """Moving transform while it is fresh, otherwise the fixed one (if any)."""
+        dyn = self.tf_dynamic.get(child)
+        st = self.tf_static_edges.get(child)
+        fresh_s = max(2.0, 3.0 * float(self.cfg["staleness"]["tf_stale_s"]))
+        if dyn is not None and (st is None or now - dyn.rx <= fresh_s):
+            return dyn
+        return st if st is not None else dyn
+
+    @property
+    def tf_edges(self) -> Dict[str, TfEdge]:
+        """Effective edge per child frame (used by /api/discovery)."""
+        now = time.monotonic()
+        return {c: e for c in set(self.tf_dynamic) | set(self.tf_static_edges)
+                if (e := self._edge(c, now)) is not None}
+
+    def tf_conflicts(self) -> List[str]:
+        """Frames that have both a fixed and a moving parent transform (a robot TF setup issue)."""
+        out = []
+        for child, st in self.tf_static_edges.items():
+            dyn = self.tf_dynamic.get(child)
+            if dyn is None:
+                continue
+            moved = math.dist(st.t[:2], dyn.t[:2]) > 0.01 or st.parent != dyn.parent
+            if moved:
+                out.append(f"{child} has a fixed ({st.parent}->{child} at {st.t[0]:.2f}, {st.t[1]:.2f}, /tf_static) "
+                           f"AND a moving ({dyn.parent}->{child}, /tf) transform - using the moving one while it is fresh")
+        return out
 
     def _resolve_base_frame(self) -> Optional[str]:
         for f in self.cfg["frames"]["base"]:
-            if f in self.tf_edges:
+            if f in self.tf_dynamic or f in self.tf_static_edges:
                 return f
         return None
 
@@ -175,7 +211,7 @@ class TelemetryStore:
             if frame in seen or len(edges) > 32:
                 return None
             seen.add(frame)
-            e = self.tf_edges.get(frame)
+            e = self._edge(frame, now)
             if e is None:
                 return None
             t, q = compose(e.t, e.q, t, q)
@@ -240,6 +276,8 @@ class TelemetryStore:
                 "source": "odometry",
                 "age_s": now - o["rx"],
             }
+        for c in self.tf_conflicts():
+            tf_info["errors"].append(c)
         tf_required = bool(frames.get("tf_required", True))
         tf_info["required"] = tf_required
         tf_info["notes"] = []
@@ -476,6 +514,11 @@ class MotionTracker:
         self.trail_step = float(ex["min_trail_step_m"])
         self.max_trail = int(ex["max_trail_points"])
         self.jitter = float(ex["jitter_threshold_m"])
+        # A pose change this large within one second is a jump of the position estimate
+        # (localisation correction, TF switch), not walking: no distance, trail is broken.
+        self.jump_m = float(ex.get("jump_threshold_m", 1.0))
+        self.jumps = 0
+        self.last_jump: Optional[Dict[str, Any]] = None
         self.distance = 0.0
         self.last_xy: Optional[Tuple[float, float, str]] = None
         self.trail: Deque[Tuple[float, float, float]] = deque(maxlen=self.max_trail)
@@ -496,12 +539,20 @@ class MotionTracker:
                nav_active: bool, cmd_active: bool, frontiers: Optional[Dict[str, Any]],
                state_topic: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         valid = bool(pose and pose.get("valid"))
+        jumped = False
         if valid:
             x, y, frame = pose["x"], pose["y"], pose["frame"]
+            if self.history and self.trail_frame == frame:
+                t_prev, x_prev, y_prev = self.history[-1]
+                step = math.hypot(x - x_prev, y - y_prev)
+                if step >= self.jump_m and now - t_prev <= 1.0:
+                    jumped = True
+                    self.jumps += 1
+                    self.last_jump = {"distance_m": step, "from": [x_prev, y_prev], "to": [x, y], "t": now}
             if self.last_xy is not None and self.last_xy[2] == frame:
                 d = math.hypot(x - self.last_xy[0], y - self.last_xy[1])
                 if d >= self.jitter:
-                    if d < 2.0:  # ignore teleports (SLAM jumps, frame switches)
+                    if not jumped and d < self.jump_m:
                         self.distance += d
                     self.last_xy = (x, y, frame)
             else:
@@ -516,7 +567,10 @@ class MotionTracker:
             if self.trail_frame != frame:
                 self.trail.clear()
                 self.trail_frame = frame
-            if not self.trail or math.hypot(x - self.trail[-1][0], y - self.trail[-1][1]) >= self.trail_step:
+            if jumped and self.trail and self.trail[-1] is not None:
+                self.trail.append(None)  # break: never draw a line across a jump
+            last = next((p for p in reversed(self.trail) if p is not None), None)
+            if last is None or jumped or math.hypot(x - last[0], y - last[1]) >= self.trail_step:
                 self.trail.append((x, y, time.time()))
 
         speed = None
@@ -587,7 +641,13 @@ class MotionTracker:
             "stalled_for_s": _r(now - self.stalled_since, 1) if self.stalled_since else None,
             "stall_events": self.stall_events,
             "moving": moving,
+            "pose_jumps": self.jumps,
+            "last_jump": None if self.last_jump is None else {
+                "distance_m": _r(self.last_jump["distance_m"], 2), "age_s": _r(now - self.last_jump["t"], 1),
+                "from": [_r(v, 2) for v in self.last_jump["from"]], "to": [_r(v, 2) for v in self.last_jump["to"]]},
         }
 
     def trail_payload(self, now: float) -> Dict[str, Any]:
-        return {"frame": self.trail_frame, "points": [[round(x, 2), round(y, 2)] for x, y, _ in self.trail]}
+        # null entries mark breaks (pose jumps) - the dashboard lifts the pen there
+        return {"frame": self.trail_frame,
+                "points": [None if p is None else [round(p[0], 2), round(p[1], 2)] for p in self.trail]}

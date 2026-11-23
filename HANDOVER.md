@@ -56,6 +56,18 @@ Agents: do not perform an action until its row says YES.
 - Config updated accordingly (200 Hz expectations, `/tf` not required, cheap
   camera/Livox liveness topics, `status_flags`, expected node = domain bridge).
 
+## Robot TF finding (2026-11-23, while navigation/LIO was running)
+
+`ros2 run tf2_ros tf2_echo map base_link` on group8 printed a CONSTANT
+`map -> base_link = (0.030, -0.020, 0)` "At time 0.0", i.e. a **static** transform
+(`/tf_static`, re-sent by the domain bridge every ~2.5 s), while a **moving**
+`map -> base_link` also arrives on `/tf` (pose ~5.7, -2.2). Two parents for the same
+child is a TF setup problem on the robot side: tf2 users (tf2_echo, possibly RViz or
+navigation on domain 8) may see the robot pinned near the origin. The monitor now
+keeps them apart, prefers the moving one while fresh, and reports the conflict in the
+TF panel. Team: find which launch file publishes the static `map -> base_link`
+(likely a placeholder static_transform_publisher) - their decision whether to remove it.
+
 ## Open questions for the team
 
 1. ~~NUC address, user, hostname~~ — answered (see Known robot facts).
@@ -235,3 +247,13 @@ _(empty — to be filled by the reviewer)_
   NUC paths sourced from robot.env (bash expanded them to the Mac home; also fixed in
   discover-remote). ensure-bridge tested locally with tmux (start, healthy re-run);
   PowerShell only via Windows CI.
+- 2026-11-23 · Claude Code · Fixed "robot moves without control" seen live: the store
+  kept one TF edge per child, so the fixed /tf_static map->base_link (0.03,-0.02)
+  re-sent every ~2.5 s overwrote the moving /tf one and the pose teleported to the
+  origin and back (diagonal lines, zigzags, inflated distance). Now separate dynamic
+  and static edges (dynamic preferred while fresh), `tf_conflicts()` warning, and the
+  MotionTracker detects pose jumps (`exploration.jump_threshold_m`, 1.0 m within 1 s):
+  no distance, trail break (`null` in trail points), `pose_jumps` / `last_jump`,
+  dashboard event + "N position jumps ignored". Also: first rate/bytes reading is no
+  longer halved; the group8 simulator test no longer depends on machine speed (it
+  failed on Windows CI). 36 bridge tests, 5 web tests, typecheck, audit.

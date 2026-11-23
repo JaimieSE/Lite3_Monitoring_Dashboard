@@ -198,6 +198,7 @@ export class TelemetryClient {
   private notifyPending = false;
   private prevTopicStatus = new Map<string, TopicStatus>();
   private prevStalled = false;
+  private prevJumps = 0;
   private prevNav: string | null = null;
   private prevState: string | null = null;
   private prevTfOk: boolean | null = null;
@@ -485,6 +486,12 @@ export class TelemetryClient {
     cap(this.vel, 6000);
 
     const ex = m.exploration;
+    if (ex.pose_jumps != null && ex.pose_jumps > this.prevJumps && ex.last_jump) {
+      const j = ex.last_jump;
+      this.emit("warn", "pose", `Position estimate jumped ${j.distance_m.toFixed(2)} m `
+        + `(${j.from[0]}, ${j.from[1]} → ${j.to[0]}, ${j.to[1]}) - localisation/TF correction, not real movement`);
+    }
+    this.prevJumps = ex.pose_jumps ?? 0;
     if (ex.stalled !== this.prevStalled) {
       if (ex.stalled) this.emit("warn", "stall", "Robot STALLED: trying to move but no progress");
       else this.emit("info", "stall", "Stall cleared");

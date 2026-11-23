@@ -101,7 +101,13 @@ export function ExplorationPanel() {
         </div>
         <div className="grid grid-cols-3 gap-x-3 gap-y-2 px-3 py-2">
           <Metric label="Frontiers" value={ex?.frontier_count ?? "—"} sub={ex?.frontier_count == null ? "no frontier topic" : undefined} />
-          <Metric label="Distance" value={fmt(ex?.distance_travelled_m, 1)} unit="m" />
+          <Metric
+            label="Distance"
+            value={fmt(ex?.distance_travelled_m, 1)}
+            unit="m"
+            sub={ex?.pose_jumps ? `${ex.pose_jumps} position jump${ex.pose_jumps === 1 ? "" : "s"} ignored` : undefined}
+            level={ex?.pose_jumps ? "warn" : undefined}
+          />
           <Metric label="Runtime" value={fmtDuration(ex?.runtime_s)} />
           <Metric
             label={cov != null ? "Coverage" : "Known area"}

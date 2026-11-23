@@ -260,6 +260,10 @@ def test_sim_odom_only_behaves_like_group8():
     assert tel["tf"]["ok"] and store.map_raw is None and store.goal is None
     assert tel["exploration"]["distance_travelled_m"] >= 0
     assert store.paths_message()["trail"]["frame"] == "odom"
+    # The 30 s above were simulated in well under a second of real time: make the rate
+    # window match the simulated time (otherwise a fast machine measures nothing yet).
+    for st in store.topics.values():
+        st.last_rate_calc = time.monotonic() - 30.0
     h = store.health_message({})
     health = {t["name"]: t for t in h["topics"]}
     # roles the robot does not have are switched off in the profile: no MISSING noise
@@ -276,8 +280,8 @@ def test_topic_bytes_per_second():
     for _ in range(100):
         s.topic_rx("/leg_odom2", 1, None, 720)
     h = {t["name"]: t for t in s.health_message({})["topics"]}
-    # first window is averaged with 0 -> about half of 72 kB/s
-    assert 30000 < h["/leg_odom2"]["bytes_per_s"] < 40000
+    # first window is taken as-is: 100 x 720 B in ~1 s
+    assert 60000 < h["/leg_odom2"]["bytes_per_s"] < 80000
     s.register_topic("extra", "/unknown_size", available=True)
     s.topic_rx("/unknown_size", 5)
     assert {t["name"]: t for t in s.health_message({})["topics"]}["/unknown_size"]["bytes_per_s"] is None
@@ -312,3 +316,33 @@ def test_health_carries_compute_in_sim():
                 assert compute and compute["simulated"] and compute["components"]
     finally:
         src.stop()
+
+
+def test_static_and_dynamic_tf_for_same_child_do_not_alternate():
+    """group8: /tf_static re-sends a fixed map->base_link (0.03,-0.02) every ~2.5 s while the
+    real moving map->base_link comes on /tf. The pose must follow the moving one."""
+    s = make_store()
+    now = time.monotonic()
+    s.set_tf("map", "base_link", (5.71, -2.19, 0.0), quat_from_yaw(0.0), static=False, now=now)
+    s.set_tf("map", "base_link", (0.03, -0.02, 0.0), quat_from_yaw(0.0), static=True, now=now + 0.1)
+    snap = s.pose_snapshot(now + 0.2)
+    assert math.isclose(snap["pose"]["x"], 5.71) and snap["pose"]["source"] == "tf"
+    assert any("fixed" in e and "moving" in e for e in snap["tf"]["errors"]), snap["tf"]
+    # if the moving transform stops for a long time, the fixed one is used (and the pose is stale-checked)
+    late = s.pose_snapshot(now + 30)
+    assert math.isclose(late["pose"]["x"], 0.03)
+
+
+def test_pose_jump_breaks_trail_and_adds_no_distance():
+    s = make_store()
+    tr = s.tracker
+    t = time.monotonic()
+    still = {"speed": 0.0, "valid": True, "angular": 0.0}
+    seq = [(5.7, -2.2), (5.7, -2.2), (0.03, -0.02), (5.7, -2.2), (5.85, -2.2)]
+    out = None
+    for i, (x, y) in enumerate(seq):
+        out = tr.update(t + i * 0.1, {"x": x, "y": y, "frame": "map", "valid": True}, still, False, False, None, None)
+    assert out["pose_jumps"] == 2 and out["last_jump"]["distance_m"] > 5
+    assert tr.distance < 0.2, tr.distance  # only the real 0.15 m step
+    pts = tr.trail_payload(t)["points"]
+    assert None in pts and pts[-1] == [5.85, -2.2]

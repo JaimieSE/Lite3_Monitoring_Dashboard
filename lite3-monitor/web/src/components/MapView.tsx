@@ -119,7 +119,7 @@ export function MapView() {
     // Without a grid (no map / map stream off) "fit" frames the trail and the robot.
     if (!map && v.autoFit && pose) {
       const pts: [number, number][] = [[pose.x, pose.y]];
-      if (paths?.trail.frame === pose.frame) pts.push(...paths.trail.points);
+      if (paths?.trail.frame === pose.frame) for (const p of paths.trail.points) if (p) pts.push(p);
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
       for (const [x, y] of pts) {
         x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
@@ -177,11 +177,19 @@ export function MapView() {
     // Draw in the map frame when there is a map; otherwise in the robot pose's own
     // frame (e.g. "odom" for robots running without a map).
     const mapFrame = map ? (client.hello?.frames.map ?? "map") : (pose?.frame ?? client.hello?.frames.map ?? "map");
-    const polyline = (pts: [number, number][], color: string, width: number, dash: number[] = []) => {
+    const polyline = (pts: ([number, number] | null)[], color: string, width: number, dash: number[] = []) => {
       if (pts.length < 2) return;
       ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      let pen = false;
+      for (const p of pts) {
+        if (!p) {
+          pen = false; // break (pose jump): lift the pen
+          continue;
+        }
+        if (pen) ctx.lineTo(p[0], p[1]);
+        else ctx.moveTo(p[0], p[1]);
+        pen = true;
+      }
       ctx.strokeStyle = color;
       ctx.lineWidth = width * px;
       ctx.lineJoin = "round";
