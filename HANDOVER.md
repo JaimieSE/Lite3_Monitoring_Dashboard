@@ -19,10 +19,10 @@ work session so the next human or agent (e.g. Codex) can continue.
 
 | Action | Approved? | By / date |
 |---|---|---|
-| SSH to NUC for read-only discovery (`discover-remote.sh`) | NO | |
-| Copy bridge to NUC (`deploy-bridge.sh`) | NO | |
-| pip install into `~/lite3-monitor/.venv` on NUC | NO | |
-| Run bridge on NUC | NO | |
+| SSH to NUC for read-only discovery (`discover-remote.sh`) | YES (done) | team ran it 2026-11-23 |
+| Copy bridge to NUC (`deploy-bridge.sh` or `git clone` on the NUC) | YES | team, in chat, 2026-11-23 |
+| pip install into the lite3-monitor `.venv` on NUC | YES | team, in chat, 2026-11-23 |
+| Run bridge on NUC | YES | team, in chat, 2026-11-23 |
 
 Agents: do not perform an action until its row says YES.
 
