@@ -63,6 +63,10 @@ class TopicStat:
     bytes_known: bool = False
     # status flags (std_msgs/Bool "is alive" topics): last value and display label
     flag_value: Optional[bool] = None
+    # robot temperature topics (role "temperature"): last value in degrees C + thresholds
+    temp_value: Optional[float] = None
+    temp_warn: Optional[float] = None
+    temp_crit: Optional[float] = None
     label: Optional[str] = None
 
 
@@ -393,6 +397,13 @@ class TelemetryStore:
                 if age is not None and age > max(2.0, 3.0 / st.min_hz):
                     status = "error"
                     notes.append(f"stale {age:.1f}s")
+        if st.role == "temperature" and st.temp_value is not None and status in ("ok", "warn", "idle"):
+            if st.temp_crit is not None and st.temp_value >= st.temp_crit:
+                status = "error"
+                notes.insert(0, f"too hot: {st.temp_value:.1f} °C ≥ {st.temp_crit:g} °C")
+            elif st.temp_warn is not None and st.temp_value >= st.temp_warn:
+                status = "warn"
+                notes.insert(0, f"hot: {st.temp_value:.1f} °C ≥ {st.temp_warn:g} °C")
         if st.role == "status_flag" and st.flag_value is False and status != "missing":
             status = "error"
             notes.insert(0, "reports NOT alive")
@@ -417,6 +428,9 @@ class TelemetryStore:
             "value": st.flag_value,
             "label": st.label,
             "bytes_per_s": _r(st.bytes_per_s, 0) if st.bytes_known else None,
+            "temp_c": _r(st.temp_value, 1),
+            "temp_warn_c": st.temp_warn,
+            "temp_crit_c": st.temp_crit,
         }
 
     def paths_message(self) -> Dict[str, Any]:

@@ -74,6 +74,9 @@ Agents: do not perform an action until its row says YES.
    terrain hazard cloud? Were they running during discovery? (Bridging more topics
    into domain 8 would be a change to the robot setup — the team's decision, not this
    project's.)
+11. **Robot temperatures** (motors / body / battery): which topic publishes them, on which
+    domain, and in what unit? The team reports the robot overheats often. Once known, add
+    it to `temperature_topics` (and bridge it into domain 8 if needed - team decision).
 10. What do `/handle_state` (Twist, 200 Hz) and `/us_publisher/ultrasound_distance`
     represent (e.g. joystick command, nearest-obstacle distance in metres)?
 
@@ -208,3 +211,15 @@ _(empty — to be filled by the reviewer)_
   "Data per topic" panels. 33 bridge tests, typecheck, build, audit; browser check
   with the group8 simulator. Component patterns are guesses until checked on the NUC
   (`top` names of the camera / Livox / navigation processes).
+- 2026-11-23 · Claude Code · Temperatures (team: "robot overheats quite a fair bit").
+  NUC: thresholds `compute.temperature.warn_c/crit_c` (80/90), CPU clock + kernel
+  thermal-throttle counters in `health.compute`. Robot: new `temperature_topics` config
+  + `temperature` role (sensor_msgs/Temperature or std_msgs/Float32/64, optional
+  `scale`, per-topic warn/crit) - EMPTY for group8, nothing found on domain 8 (open
+  question 11); simulator adds two labelled simulated robot temps when empty.
+  Dashboard: "Temperatures" graph panel (NUC + robot series, 1-30 min window, warn
+  line, value tiles), `NUC °C` and `Robot °C` pills in the top bar, thermal events with
+  3 °C hysteresis (`web/src/lib/thermal.ts`; first browser run showed flapping without
+  it), throttling start/stop as two events (was one per second), temps + NUC CPU in
+  recorded samples, history detail chart and summary/compare rows. 34 bridge tests,
+  5 web tests, typecheck, build, audit; browser check through a simulated heat episode.

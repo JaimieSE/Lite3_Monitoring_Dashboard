@@ -23,6 +23,12 @@ export interface Sample {
   transit_ms?: number | null;
   /** Whether the occupancy-grid stream was on. Added in v0.2. */
   map_stream?: boolean;
+  /** Hottest NUC temperature sensor (°C). Added in v0.3. */
+  nuc_temp_c?: number | null;
+  /** NUC CPU load, whole machine (%). Added in v0.3. */
+  nuc_cpu_pct?: number | null;
+  /** Hottest robot temperature source (°C), if any are configured. Added in v0.3. */
+  robot_temp_c?: number | null;
   rates: Record<string, number | null>;
 }
 
@@ -53,6 +59,10 @@ export interface SessionSummary {
   final_frontiers: number | null;
   link_lost_count: number;
   link_rtt_ms: { median: number; p95: number; max: number } | null;
+  /** NUC temperature: maximum, and seconds spent at/above the warn threshold (80 °C default). */
+  nuc_temp?: { max_c: number; hot_s: number } | null;
+  /** Hottest robot temperature seen during the session. */
+  robot_temp_max_c?: number | null;
   link_lost_s: number;
   stall_events: number;
   error_events: number;

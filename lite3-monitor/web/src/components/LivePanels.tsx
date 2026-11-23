@@ -469,7 +469,7 @@ export function ComputePanel() {
   const { client } = useTelemetry();
   const c = client.identityProblem ? null : client.health?.compute ?? null;
   const live = client.link === "live";
-  const tLevel: Level = c?.temp_max_c == null ? "idle" : c.temp_max_c >= 90 ? "crit" : c.temp_max_c >= 80 ? "warn" : "good";
+  const tLevel: Level = client.tempLevel === "crit" ? "crit" : client.tempLevel === "warn" ? "warn" : client.tempLevel === "ok" ? "good" : "idle";
   const cpuLevel: Level = c?.cpu_total_pct == null ? "idle" : c.cpu_total_pct >= 90 ? "crit" : c.cpu_total_pct >= 75 ? "warn" : "good";
   const maxComp = Math.max(100, ...(c?.components ?? []).map((x) => x.cpu_pct));
   return (
@@ -493,9 +493,28 @@ export function ComputePanel() {
                 value={c.mem_used_mb == null ? "—" : (c.mem_used_mb / 1024).toFixed(1)}
                 unit={c.mem_total_mb ? `/ ${(c.mem_total_mb / 1024).toFixed(1)} GB` : "GB"}
               />
-              <Metric label="Hottest sensor" value={fmt(c.temp_max_c, 0)} unit="°C" level={tLevel} sub={c.temps[0]?.label ?? "no sensors"} />
+              <Metric
+                label="Hottest sensor"
+                value={fmt(c.temp_max_c, 0)}
+                unit="°C"
+                level={tLevel}
+                sub={client.throttlingNow ? `throttling · ${c.cpu_mhz}/${c.cpu_max_mhz} MHz` : client.tempPeak ? `peak ${client.tempPeak.c} °C` : c.temps[0]?.label ?? "no sensors"}
+              />
               <Metric label="Disk free" value={fmt(c.disk_free_gb, 0)} unit="GB" level={c.disk_free_gb != null && c.disk_free_gb < 5 ? "warn" : undefined} />
             </div>
+            {c.temps.length > 1 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 border-t border-line px-3 py-1.5 text-2xs">
+                {c.temps.map((t) => (
+                  <span key={t.label} className="num">
+                    <span className="text-faint">{t.label}</span>{" "}
+                    <span className={t.c >= (c.temp_crit_c ?? 90) ? "text-crit" : t.c >= (c.temp_warn_c ?? 80) ? "text-warn" : "text-ink"}>
+                      {t.c} °C
+                    </span>
+                  </span>
+                ))}
+                {c.throttle_count != null ? <span className="num text-faint">throttle events {c.throttle_count}</span> : null}
+              </div>
+            ) : null}
             <div className="border-t border-line px-3 py-2">
               <div className="mb-1 flex justify-between text-2xs text-faint">
                 <span>CPU by component (% of one core, like top)</span>
@@ -557,6 +576,134 @@ export function DataRatePanel() {
           </div>
           <div className="num">
             Wi-Fi to this laptop: {ls.kbpsMain.toFixed(1)} kB/s telemetry + {ls.kbpsMap.toFixed(1)} kB/s map
+          </div>
+        </div>
+      </LiveGate>
+    </Panel>
+  );
+}
+
+const TEMP_WINDOWS = [
+  { label: "1m", ms: 60_000 },
+  { label: "5m", ms: 300_000 },
+  { label: "15m", ms: 900_000 },
+  { label: "30m", ms: 1_800_000 },
+];
+// Fixed categorical slots: NUC first, robot sources after it (never status colours).
+const TEMP_SLOTS = ["s2", "s1", "s3", "s5", "s7"];
+
+function levelOf(l: string): Level {
+  return l === "crit" ? "crit" : l === "warn" ? "warn" : l === "ok" ? "good" : "idle";
+}
+
+function TempTile({ title, c, level, sub, slot }: { title: string; c: number | null; level: Level; sub: string; slot: string }) {
+  return (
+    <div className="rounded border border-line bg-panel2 px-2.5 py-1.5">
+      <div className="flex items-center gap-1.5">
+        <span aria-hidden className="inline-block h-0.5 w-3" style={{ background: `rgb(var(--${slot}))` }} />
+        <span className="label truncate">{title}</span>
+      </div>
+      <div className="mt-0.5 flex items-baseline justify-between gap-2">
+        <span className="num text-xl leading-tight text-ink">
+          {c == null ? "—" : c.toFixed(1)}
+          <span className="ml-0.5 text-2xs text-muted">°C</span>
+        </span>
+        <StatusPill level={level}>{level === "crit" ? "overheating" : level === "warn" ? "hot" : level === "good" ? "ok" : "n/a"}</StatusPill>
+      </div>
+      <div className="truncate text-2xs text-faint">{sub}</div>
+    </div>
+  );
+}
+
+/** NUC and robot temperatures over time, with thresholds. */
+export function TemperaturePanel() {
+  const { client } = useTelemetry();
+  const [win, setWin] = useState(TEMP_WINDOWS[1]);
+  const live = client.link === "live" && !client.identityProblem;
+  const c = client.identityProblem ? null : client.health?.compute ?? null;
+  const robot = client.robotTemps;
+  const now = Date.now();
+  const domain: [number, number] = [now - win.ms, now];
+  const pts = client.identityProblem ? [] : client.temps;
+  const fmtX = (x: number) => {
+    const d = Math.round((x - now) / 1000);
+    if (d === 0) return "now";
+    return Math.abs(d) >= 120 ? `${Math.round(d / 60)}m` : `${d}s`;
+  };
+  const series: Series[] = [];
+  if (c && c.temp_max_c != null) {
+    series.push({ key: "nuc", label: "NUC (hottest sensor)", color: TEMP_SLOTS[0], points: pts.map((p) => ({ x: p.t, y: p.max })) });
+  }
+  robot.forEach((r, i) => {
+    series.push({ key: r.name, label: r.label, color: TEMP_SLOTS[(i + 1) % TEMP_SLOTS.length], points: pts.map((p) => ({ x: p.t, y: p.robot[r.label] ?? null })) });
+  });
+  const warnRef = c?.temp_warn_c ?? robot.find((r) => r.warn != null)?.warn ?? 80;
+  return (
+    <Panel
+      title="Temperatures"
+      className="h-full"
+      right={
+        <span className="flex items-center gap-2">
+          {c?.simulated || robot.some((r) => r.label.includes("(sim)")) ? <span className="text-2xs text-warn">simulated</span> : null}
+          {TEMP_WINDOWS.map((w) => (
+            <button key={w.label} onClick={() => setWin(w)} className={`rounded px-1.5 text-2xs ${win === w ? "bg-panel2 text-ink" : "text-faint hover:text-ink"}`}>
+              {w.label}
+            </button>
+          ))}
+        </span>
+      }
+    >
+      <LiveGate live={live}>
+        <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-[15rem_1fr]">
+          <div className="flex flex-col gap-2">
+            <TempTile
+              title="NUC (hottest sensor)"
+              c={c?.temp_max_c ?? null}
+              level={levelOf(client.tempLevel)}
+              slot={TEMP_SLOTS[0]}
+              sub={
+                c?.temp_max_c == null
+                  ? "no NUC sensors found"
+                  : client.throttlingNow
+                    ? `throttling · ${c.cpu_mhz}/${c.cpu_max_mhz} MHz`
+                    : `${c.temps[0]?.label ?? ""}${client.tempPeak ? ` · peak ${client.tempPeak.c} °C` : ""}`
+              }
+            />
+            {robot.map((r, i) => (
+              <TempTile
+                key={r.name}
+                title={r.label}
+                c={r.c}
+                level={r.status === "missing" ? "idle" : levelOf(client.robotTempLevel(r.name))}
+                slot={TEMP_SLOTS[(i + 1) % TEMP_SLOTS.length]}
+                sub={r.status === "missing" ? `${r.name} not found` : `warn ${r.warn ?? "—"} · critical ${r.crit ?? "—"} °C`}
+              />
+            ))}
+            {robot.length === 0 ? (
+              <div className="rounded border border-dashed border-line px-2.5 py-2 text-2xs text-faint">
+                Robot temperature: no source configured. The robot does not publish motor / body temperatures on
+                domain 8 yet - add the topic to <span className="num text-muted">temperature_topics</span> in the bridge
+                config when the team finds it.
+              </div>
+            ) : null}
+          </div>
+          <div className="min-w-0">
+            <TimeSeriesChart
+              series={series}
+              domain={domain}
+              height={210}
+              unit="°C"
+              digits={1}
+              includeZero={false}
+              minSpan={15}
+              xFormat={fmtX}
+              refLine={{ y: warnRef, label: "warn" }}
+              emptyText="no temperature data yet"
+            />
+            <div className="mt-1 text-2xs text-faint">
+              Dashed line: warning level ({warnRef} °C). NUC warn {c?.temp_warn_c ?? 80} °C / critical {c?.temp_crit_c ?? 90} °C.
+              Hover the graph for exact values.
+            </div>
           </div>
         </div>
       </LiveGate>

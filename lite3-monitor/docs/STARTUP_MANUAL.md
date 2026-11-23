@@ -111,6 +111,12 @@ If any of these is wrong → §4 Troubleshooting.
   run; press **Record session** to start the next one.
 - **Map stream** button is shown as "Map: disabled" — expected, we run without a map.
 - **Event log** (bottom right) lists every warning: stalls, sensor dropouts, link loss.
+- **Temperatures** (graph under the map) shows the NUC's hottest sensor and any robot
+  temperatures over the last 1–30 min. The top bar always shows `NUC xx °C` (amber ≥ 80 °C,
+  red ≥ 90 °C, "· throttling" when the CPU slows itself down) and `Robot xx °C` once a
+  robot temperature topic is configured. If the NUC runs hot: give it airflow / a break
+  before performance drops. Robot temperature topics go in `temperature_topics` in
+  `bridge/config/default.yaml` (none exist on domain 8 yet).
 - **NUC compute** shows the NUC's CPU, memory, temperature and disk, and how much CPU
   each part uses (camera driver, LiDAR driver, domain bridge, navigation, this monitor).
   **Data per topic** shows how much data each monitored sensor stream produces.
@@ -152,6 +158,8 @@ Recorded sessions stay on your laptop: **History** tab → export **JSON / CSV**
 | Robot box does not move | Check System health: `/leg_odom2` must be green ≈ 200 Hz. If missing, the robot's driver / domain bridge on the NUC is not running. |
 | A sensor chip is red (**NOT alive**) | The robot itself reports that sensor as dead — check the robot, not the monitor. |
 | **delay** amber/orange, spikes | Busy Wi-Fi. Fewer viewers, move closer to the access point. |
+| **NUC 9x °C** red / "throttling" | The NUC is overheating and slowing its CPU. Pause, improve airflow, check the fan; navigation may lag until it cools. |
+| No `NUC °C` pill at all | The NUC exposes no temperature sensors to normal users (rare). Check `ls /sys/class/hwmon`. |
 | Asked for the password again and again | Normal after every Wi-Fi drop. Set up an SSH key to avoid it ([TEAM_SETUP.md](TEAM_SETUP.md) §3). |
 | `tmux: command not found` | Run the bridge in a normal SSH window and leave that window open. |
 | Dashboard page blank / old after an update | Stop `start-robot`, then in `web/` run `npm run build`, start again. |

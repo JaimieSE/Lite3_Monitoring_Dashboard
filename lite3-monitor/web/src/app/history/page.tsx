@@ -208,7 +208,7 @@ function SessionDetail({ s, onSaved }: { s: Session; onSaved: () => void }) {
           </select>
         }
       >
-        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2 xl:grid-cols-4">
           <div>
             <div className="mb-1 text-2xs text-muted">Speed</div>
             <TimeSeriesChart domain={domain} unit="m/s" xFormat={elapsedFmt} minSpan={0.4} height={140}
@@ -223,6 +223,17 @@ function SessionDetail({ s, onSaved }: { s: Session; onSaved: () => void }) {
             <div className="mb-1 text-2xs text-muted">Rate of {topic || "—"}</div>
             <TimeSeriesChart domain={domain} unit="Hz" xFormat={elapsedFmt} digits={1} minSpan={2} height={140}
               series={[{ key: "r", label: topic, color: "s2", points: s.samples.map((p) => ({ x: x(p.t), y: p.rates[topic] ?? null })) }]} />
+          </div>
+          <div>
+            <div className="mb-1 text-2xs text-muted">Temperatures</div>
+            <TimeSeriesChart domain={domain} unit="°C" xFormat={elapsedFmt} digits={1} minSpan={10} height={140} includeZero={false}
+              refLine={{ y: 80, label: "warn" }} emptyText="not recorded"
+              series={[
+                { key: "t", label: "NUC", color: "s2", points: s.samples.map((p) => ({ x: x(p.t), y: p.nuc_temp_c ?? null })) },
+                ...(s.samples.some((p) => p.robot_temp_c != null)
+                  ? [{ key: "r", label: "Robot (hottest)", color: "s1", points: s.samples.map((p) => ({ x: x(p.t), y: p.robot_temp_c ?? null })) }]
+                  : []),
+              ]} />
           </div>
         </div>
       </Panel>
@@ -242,6 +253,8 @@ function SummaryGrid({ s }: { s: Session }) {
     ["Frontiers left", sm.final_frontiers != null ? String(sm.final_frontiers) : "n/a"],
     ["Link losses", `${sm.link_lost_count} (${fmt(sm.link_lost_s, 0)} s)`],
     ["Link delay", sm.link_rtt_ms ? `${sm.link_rtt_ms.median} ms (p95 ${sm.link_rtt_ms.p95})` : "n/a"],
+    ["NUC max temp", sm.nuc_temp ? `${sm.nuc_temp.max_c} °C (${sm.nuc_temp.hot_s} s ≥ 80 °C)` : "n/a"],
+    ["Robot max temp", sm.robot_temp_max_c != null ? `${sm.robot_temp_max_c} °C` : "n/a"],
     ["Stalls", String(sm.stall_events)],
     ["Errors / warns", `${sm.error_events} / ${sm.warn_events}`],
   ];
@@ -282,6 +295,8 @@ function Compare({ sessions }: { sessions: Session[] }) {
     ["Avg moving speed (m/s)", (s) => fmt(s.summary.avg_moving_speed, 2)],
     ["Link losses", (s) => `${s.summary.link_lost_count} (${fmt(s.summary.link_lost_s, 0)} s)`],
     ["Link delay median / p95 (ms)", (s) => (s.summary.link_rtt_ms ? `${s.summary.link_rtt_ms.median} / ${s.summary.link_rtt_ms.p95}` : "—")],
+    ["NUC max temp (°C) / time ≥ 80 °C", (s) => (s.summary.nuc_temp ? `${s.summary.nuc_temp.max_c} / ${s.summary.nuc_temp.hot_s} s` : "—")],
+    ["Robot max temp (°C)", (s) => (s.summary.robot_temp_max_c != null ? String(s.summary.robot_temp_max_c) : "—")],
     ["Stall events", (s) => String(s.summary.stall_events)],
     ["Errors / warnings", (s) => `${s.summary.error_events} / ${s.summary.warn_events}`],
     [`${topic} avg Hz (min)`, (s) => (s.summary.topic_rates[topic] ? `${fmt(s.summary.topic_rates[topic].avg, 1)} (${fmt(s.summary.topic_rates[topic].min, 1)})` : "—")],
@@ -327,7 +342,7 @@ function Compare({ sessions }: { sessions: Session[] }) {
         <Trajectory sessions={sessions} />
       </Panel>
       <Panel title="Overlaid by elapsed time" className="col-span-12">
-        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2 xl:grid-cols-4">
           <div>
             <div className="mb-1 text-2xs text-muted">Speed</div>
             <TimeSeriesChart domain={domain} unit="m/s" xFormat={elapsedFmt} minSpan={0.4} height={150} series={series((p) => p.speed)} />
@@ -339,6 +354,11 @@ function Compare({ sessions }: { sessions: Session[] }) {
           <div>
             <div className="mb-1 text-2xs text-muted">Rate of {topic}</div>
             <TimeSeriesChart domain={domain} unit="Hz" xFormat={elapsedFmt} digits={1} minSpan={2} height={150} series={series((p) => p.rates[topic] ?? null)} />
+          </div>
+          <div>
+            <div className="mb-1 text-2xs text-muted">NUC temperature</div>
+            <TimeSeriesChart domain={domain} unit="°C" xFormat={elapsedFmt} digits={1} minSpan={10} height={150} includeZero={false}
+              refLine={{ y: 80, label: "warn" }} emptyText="not recorded" series={series((p) => p.nuc_temp_c ?? null)} />
           </div>
         </div>
       </Panel>

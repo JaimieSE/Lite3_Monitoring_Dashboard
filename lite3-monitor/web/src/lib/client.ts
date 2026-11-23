@@ -30,6 +30,13 @@ export interface VelPoint { t: number; linear: number | null; angular: number | 
 export interface RatePoint { t: number; rates: Record<string, number | null> }
 export interface CoveragePoint { t: number; knownArea: number | null; coveragePct: number | null; frontiers: number | null }
 export interface LatencyPoint { t: number; rtt: number | null; transit: number | null }
+export interface TempPoint { t: number; max: number | null; sensors: Record<string, number>; robot: Record<string, number | null> }
+/** A robot temperature source (from the bridge's temperature_topics). */
+export interface RobotTemp { name: string; label: string; c: number | null; warn: number | null; crit: number | null; status: string }
+
+
+import { tempLevelWithHysteresis, type TempLevel } from "./thermal";
+export { tempLevelWithHysteresis, type TempLevel };
 export type MapLinkState = "off" | "disabled" | "connecting" | "live";
 
 function cap<T>(arr: T[], n: number) {
@@ -175,6 +182,9 @@ export class TelemetryClient {
   rates: RatePoint[] = [];
   coverage: CoveragePoint[] = [];
   latency: LatencyPoint[] = [];
+  temps: TempPoint[] = [];
+  /** Highest NUC temperature seen since the page was opened. */
+  tempPeak: { c: number; t: number } | null = null;
   events: SessionEvent[] = [];
 
   private main: Channel;
@@ -200,6 +210,11 @@ export class TelemetryClient {
   private lastRateCalc = Date.now();
   private byteWindow: { t: number; main: number; map: number }[] = [];
   private highLatency = false;
+  private prevTempLevel: TempLevel = "unknown";
+  private robotTempLevels = new Map<string, TempLevel>();
+  private prevThrottle: number | null = null;
+  private throttleEpisode: { start: number; events: number } | null = null;
+  private lastThrottleAt = 0;
 
   constructor() {
     this.main = new Channel(() => this.bridgeUrl, (d) => this.handle(d, "main"), () => this.notify(), SOCKET_DEAD_AFTER_MS);
@@ -433,6 +448,9 @@ export class TelemetryClient {
       this.rates = [];
       this.coverage = [];
       this.latency = [];
+      this.temps = [];
+      this.tempPeak = null;
+      this.robotTempLevels.clear();
       this.probes = [];
       this.transits = [];
       this.prevTopicStatus.clear();
@@ -494,6 +512,12 @@ export class TelemetryClient {
     for (const t of h.topics) {
       rates[t.name] = t.status === "missing" ? null : t.rate_hz;
       const prev = this.prevTopicStatus.get(t.name);
+      // Temperature topics: hot/too-hot events come from onCompute (with hysteresis);
+      // here only report the topic disappearing or coming back.
+      if (t.role === "temperature" && prev !== t.status && t.status !== "missing" && prev !== "missing") {
+        this.prevTopicStatus.set(t.name, t.status);
+        continue;
+      }
       if (prev !== t.status) {
         if (t.status === "error" || t.status === "missing") this.emit("error", "topic", `${t.name}: ${t.status.toUpperCase()} ${t.note}`);
         else if (t.status === "warn") this.emit("warn", "topic", `${t.name}: ${t.note}`);
@@ -503,6 +527,7 @@ export class TelemetryClient {
     }
     this.rates.push({ t: now, rates });
     cap(this.rates, 900);
+    this.onCompute(h, now);
     // coverage comes from health so it keeps working with the map stream off
     const ms = h.map?.stats;
     if (h.map && ms && h.map.version !== this.prevMapStatsVersion) {
@@ -515,6 +540,87 @@ export class TelemetryClient {
       });
       cap(this.coverage, 900);
     }
+  }
+
+  /** NUC temperature trend, threshold events and thermal-throttling detection. */
+  private onCompute(h: HealthMsg, now: number) {
+    const robot: Record<string, number | null> = {};
+    for (const rt of this.robotTemps) {
+      robot[rt.label] = rt.c;
+      const prev = this.robotTempLevels.get(rt.name) ?? "unknown";
+      const lv = tempLevelWithHysteresis(rt.c, rt.warn, rt.crit, prev);
+      if (lv !== prev && lv !== "unknown") {
+        if (lv === "crit") this.emit("error", "thermal", `ROBOT OVERHEATING: ${rt.label} ${rt.c} °C ≥ ${rt.crit} °C`);
+        else if (lv === "warn") this.emit("warn", "thermal", `Robot hot: ${rt.label} ${rt.c} °C ≥ ${rt.warn} °C`);
+        else if (prev === "warn" || prev === "crit") this.emit("info", "thermal", `${rt.label} back to normal (${rt.c} °C)`);
+      }
+      this.robotTempLevels.set(rt.name, lv);
+    }
+    const c = h.compute && !h.compute.error ? h.compute : null;
+    const sensors: Record<string, number> = {};
+    for (const t of c?.temps.slice(0, 4) ?? []) sensors[t.label] = t.c;
+    if (c || this.robotTemps.length) {
+      this.temps.push({ t: now, max: c?.temp_max_c ?? null, sensors, robot });
+      cap(this.temps, 1800); // 30 min at 1 Hz
+    }
+    if (!c) return;
+    if (c.temp_max_c != null && (!this.tempPeak || c.temp_max_c > this.tempPeak.c)) this.tempPeak = { c: c.temp_max_c, t: now };
+    const level = tempLevelWithHysteresis(c.temp_max_c, c.temp_warn_c ?? 80, c.temp_crit_c ?? 90, this.prevTempLevel);
+    this.nucTempLevel = level;
+    if (level !== this.prevTempLevel && level !== "unknown") {
+      const where = c.temps[0]?.label ?? "NUC";
+      if (level === "crit") this.emit("error", "thermal", `NUC OVERHEATING: ${c.temp_max_c} °C (${where}) ≥ ${c.temp_crit_c} °C`);
+      else if (level === "warn") this.emit("warn", "thermal", `NUC hot: ${c.temp_max_c} °C (${where}) ≥ ${c.temp_warn_c} °C`);
+      else if (this.prevTempLevel === "warn" || this.prevTempLevel === "crit") this.emit("info", "thermal", `NUC temperature back to normal (${c.temp_max_c} °C)`);
+      this.prevTempLevel = level;
+    }
+    // Throttling: one event when it starts, one when it has stopped for 10 s (with a total),
+    // never one per health message.
+    if (c.throttle_count != null) {
+      if (this.prevThrottle != null && c.throttle_count > this.prevThrottle) {
+        if (this.throttleEpisode == null) {
+          this.throttleEpisode = { start: now, events: 0 };
+          this.emit("warn", "thermal", `CPU thermal throttling started (${c.temp_max_c} °C) - the NUC is slowing its CPU to protect itself`);
+        }
+        this.throttleEpisode.events += c.throttle_count - this.prevThrottle;
+        this.lastThrottleAt = now;
+      } else if (this.throttleEpisode && now - this.lastThrottleAt > 10_000) {
+        const secs = ((this.lastThrottleAt - this.throttleEpisode.start) / 1000).toFixed(0);
+        this.emit("info", "thermal", `CPU throttling stopped (${this.throttleEpisode.events} events over ${secs} s)`);
+        this.throttleEpisode = null;
+      }
+      this.prevThrottle = c.throttle_count;
+    }
+  }
+
+  private nucTempLevel: TempLevel = "unknown";
+
+  /** Current NUC temperature level (bridge-configured thresholds, with 3 °C hysteresis). */
+  get tempLevel(): TempLevel {
+    const c = this.identityProblem ? null : this.health?.compute;
+    if (!c || c.temp_max_c == null) return "unknown";
+    return this.nucTempLevel;
+  }
+
+  /** Robot temperatures reported through the bridge's temperature_topics. */
+  get robotTemps(): RobotTemp[] {
+    if (this.identityProblem || !this.health) return [];
+    return this.health.topics
+      .filter((t) => t.role === "temperature")
+      .map((t) => ({
+        name: t.name, label: t.label ?? t.name, c: t.status === "missing" ? null : t.temp_c ?? null,
+        warn: t.temp_warn_c ?? null, crit: t.temp_crit_c ?? null, status: t.status,
+      }));
+  }
+
+  robotTempLevel(name: string): TempLevel {
+    return this.robotTempLevels.get(name) ?? "unknown";
+  }
+
+  /** True when the CPU is currently clocked well below its maximum while hot (throttling). */
+  get throttlingNow(): boolean {
+    const c = this.health?.compute;
+    return !!c && c.cpu_mhz != null && c.cpu_max_mhz != null && this.tempLevel !== "ok" && c.cpu_mhz < 0.6 * c.cpu_max_mhz;
   }
 
   private onMap(m: MapMsg) {

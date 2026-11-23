@@ -70,6 +70,8 @@ export function TopBar() {
               {telAge == null ? "—" : fmtAge(telAge / 1000)}
             </span>
             <LinkDelay />
+            <NucTemp />
+            <RobotTempPill />
           </span>
 
           <span className="h-4 w-px bg-line" />
@@ -132,6 +134,49 @@ function LinkDelay() {
     <span title={title}>
       <StatusPill level={level}>
         <span className="normal-case tracking-normal">delay {failed ? "—" : `${Math.round(rtt)} ms`}</span>
+      </StatusPill>
+    </span>
+  );
+}
+
+/** Always-visible NUC temperature (hottest sensor), with thresholds from the bridge config. */
+function NucTemp() {
+  const { client } = useTelemetry();
+  const c = client.identityProblem ? null : client.health?.compute;
+  if (!c || c.temp_max_c == null) return null;
+  const lv = client.tempLevel;
+  const level: Level = client.link !== "live" ? "idle" : lv === "crit" ? "crit" : lv === "warn" ? "warn" : "good";
+  const title = [
+    ...c.temps.map((t) => `${t.label}: ${t.c} °C`),
+    `Warn ≥ ${c.temp_warn_c ?? 80} °C · critical ≥ ${c.temp_crit_c ?? 90} °C`,
+    c.cpu_mhz != null ? `CPU clock ${c.cpu_mhz} / ${c.cpu_max_mhz} MHz` : "",
+    client.tempPeak ? `Peak since page opened: ${client.tempPeak.c} °C at ${new Date(client.tempPeak.t).toLocaleTimeString()}` : "",
+  ].filter(Boolean).join("\n");
+  return (
+    <span title={title}>
+      <StatusPill level={level} className={lv === "crit" && client.link === "live" ? "lost-pulse" : ""}>
+        <span className="normal-case tracking-normal">
+          NUC {Math.round(c.temp_max_c)} °C{client.throttlingNow ? " · throttling" : ""}
+        </span>
+      </StatusPill>
+    </span>
+  );
+}
+
+/** Hottest robot temperature source (motors / body), if the bridge has any configured. */
+function RobotTempPill() {
+  const { client } = useTelemetry();
+  const rts = client.robotTemps.filter((r) => r.c != null);
+  if (!rts.length) return null;
+  // Show the most serious source (each has its own thresholds), hottest as tie-breaker.
+  const rank = (n: string) => ({ crit: 3, warn: 2, ok: 1, unknown: 0 })[client.robotTempLevel(n)];
+  const hottest = rts.reduce((a, b) => (rank(b.name) > rank(a.name) || (rank(b.name) === rank(a.name) && (b.c ?? -1e9) > (a.c ?? -1e9)) ? b : a));
+  const lv = client.robotTempLevel(hottest.name);
+  const level: Level = client.link !== "live" ? "idle" : lv === "crit" ? "crit" : lv === "warn" ? "warn" : "good";
+  return (
+    <span title={rts.map((r) => `${r.label}: ${r.c} °C (warn ${r.warn ?? "—"}, critical ${r.crit ?? "—"})`).join("\n")}>
+      <StatusPill level={level} className={lv === "crit" && client.link === "live" ? "lost-pulse" : ""}>
+        <span className="normal-case tracking-normal">Robot {Math.round(hottest.c ?? 0)} °C{rts.length > 1 ? ` (${hottest.label.replace(" (sim)", "")})` : ""}</span>
       </StatusPill>
     </span>
   );

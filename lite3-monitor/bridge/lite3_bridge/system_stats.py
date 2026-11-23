@@ -42,6 +42,11 @@ class SystemStats:
         self._prev_t: Optional[float] = None
         self._match_cache: Dict[int, Tuple[str, str]] = {}  # pid -> (comm, component)
         self._rng = random.Random(3)
+        th = (cfg.get("compute") or {}).get("temperature") or {}
+        self.temp_warn_c = float(th.get("warn_c", 80))
+        self.temp_crit_c = float(th.get("crit_c", 90))
+        self._sim_start = time.time()
+        self._sim_throttle = 0
 
     # ------------------------------------------------------------------ public
     def sample(self) -> Optional[Dict[str, Any]]:
@@ -117,8 +122,37 @@ class SystemStats:
                 del self._prev_proc[pid]
                 self._match_cache.pop(pid, None)
 
-        return self._assemble(cpu_total_pct, procs, self._meminfo(), self._loadavg(), self._temps(),
-                              self._disk(), simulated=False)
+        out = self._assemble(cpu_total_pct, procs, self._meminfo(), self._loadavg(), self._temps(),
+                             self._disk(), simulated=False)
+        out.update(self._cpufreq())
+        return out
+
+    @staticmethod
+    def _cpufreq() -> Dict[str, Any]:
+        """Average current vs maximum CPU clock and thermal-throttle counters (if exposed)."""
+        base = "/sys/devices/system/cpu"
+        cur, mx, throttle = [], [], 0
+        found_throttle = False
+        try:
+            cpus = [d for d in os.listdir(base) if d.startswith("cpu") and d[3:].isdigit()]
+        except OSError:
+            cpus = []
+        for c in cpus:
+            f = _read(f"{base}/{c}/cpufreq/scaling_cur_freq")
+            m = _read(f"{base}/{c}/cpufreq/cpuinfo_max_freq")
+            if f and m and f.strip().isdigit() and m.strip().isdigit():
+                cur.append(int(f) / 1000.0)
+                mx.append(int(m) / 1000.0)
+            for name in ("core_throttle_count", "package_throttle_count"):
+                t = _read(f"{base}/{c}/thermal_throttle/{name}")
+                if t and t.strip().isdigit():
+                    found_throttle = True
+                    throttle += int(t)
+        return {
+            "cpu_mhz": round(sum(cur) / len(cur)) if cur else None,
+            "cpu_max_mhz": round(sum(mx) / len(mx)) if mx else None,
+            "throttle_count": throttle if found_throttle else None,
+        }
 
     @staticmethod
     def _meminfo() -> Dict[str, Optional[float]]:
@@ -203,6 +237,8 @@ class SystemStats:
             "mem_total_mb": mem["total_mb"],
             "temps": temps,
             "temp_max_c": temps[0]["c"] if temps else None,
+            "temp_warn_c": self.temp_warn_c,
+            "temp_crit_c": self.temp_crit_c,
             "disk_free_gb": disk_free_gb,
             "components": comp_list,
             "top": [{k: p[k] for k in ("name", "component", "cpu_pct", "rss_mb")} for p in top],
@@ -224,10 +260,25 @@ class SystemStats:
         for p in procs:
             p["cpu_pct"] = round(p["cpu_pct"], 1)
         total = round(min(100.0, sum(p["cpu_pct"] for p in procs) / self.ncpu + r.uniform(1, 3)), 1)
-        temps = [{"label": "coretemp Package id 0", "c": round(wob(58, 4), 1)},
-                 {"label": "acpitz", "c": round(wob(45, 2), 1)}]
-        return self._assemble(total, procs, {"used_mb": 5200.0, "total_mb": 15800.0}, round(wob(2.1, 0.4), 2),
-                              temps, 182.4, simulated=True)
+        # Heat episodes: every 4 min the package heats to ~92 C for ~40 s, so the warnings,
+        # throttling indicator and chart can be exercised without a robot.
+        phase = (t - self._sim_start) % 240.0
+        heat = 0.0
+        if 150.0 <= phase < 230.0:
+            x = (phase - 150.0) / 80.0
+            heat = 34.0 * math.sin(math.pi * x)
+        pkg = round(wob(58, 2) + heat, 1)
+        temps = [{"label": "coretemp Package id 0", "c": pkg},
+                 {"label": "coretemp Core 0", "c": round(pkg - 2.5, 1)},
+                 {"label": "acpitz", "c": round(wob(45, 1) + heat / 3, 1)}]
+        out = self._assemble(total, procs, {"used_mb": 5200.0, "total_mb": 15800.0}, round(wob(2.1, 0.4), 2),
+                             temps, 182.4, simulated=True)
+        throttling = pkg >= 90.0
+        if throttling:
+            self._sim_throttle += 7
+        out.update({"cpu_mhz": 1200 if throttling else 2800, "cpu_max_mhz": 4200,
+                    "throttle_count": self._sim_throttle})
+        return out
 
     def _name_like(self, needle: str) -> str:
         for name, patterns in self.components:

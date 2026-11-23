@@ -37,10 +37,11 @@ NODE_NAME = "lite3_monitor_readonly"
 
 # Roles whose content we decode. Everything else is counted only.
 DECODED_ROLES = {"map", "odometry", "tf", "tf_static", "global_plan", "local_plan", "goal", "nav_status",
-                 "frontiers", "exploration_state", "diagnostics", "cmd_vel", "status_flag"}
+                 "frontiers", "exploration_state", "diagnostics", "cmd_vel", "status_flag", "temperature"}
 # Rare / latched roles: always decode (never throttled).
 UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state", "status_flag"}
 FLAG_TYPE = "std_msgs/msg/Bool"
+TEMP_TYPES = ("sensor_msgs/msg/Temperature", "std_msgs/msg/Float32", "std_msgs/msg/Float64")
 # Roles where we prefer RELIABLE (if every publisher offers it) so large or
 # rare messages are not silently lost.
 RELIABLE_ROLES = {"map", "tf_static", "goal", "nav_status", "frontiers", "exploration_state", "global_plan"}
@@ -150,6 +151,10 @@ class RosSource:
         for extra in self.cfg.get("extra_health_topics") or []:
             self.store.register_topic("extra", extra["name"], expected_hz=extra.get("expected_hz"),
                                       min_hz=extra.get("min_hz"))
+        for tt in self.cfg.get("temperature_topics") or []:
+            self.store.register_topic("temperature", tt["name"], label=tt.get("label") or tt["name"],
+                                      expected_hz=tt.get("expected_hz"), min_hz=tt.get("min_hz"),
+                                      temp_warn=tt.get("warn_c"), temp_crit=tt.get("crit_c"))
         for flag in self.cfg.get("status_flags") or []:
             self.store.register_topic("status_flag", flag["name"], label=flag.get("label") or flag["name"],
                                       expected_hz=flag.get("expected_hz"), min_hz=flag.get("min_hz"),
@@ -212,6 +217,19 @@ class RosSource:
                 st.decoded = True
                 self._subscribe("status_flag", name, FLAG_TYPE)
 
+        for tt in self.cfg.get("temperature_topics") or []:
+            name = tt["name"]
+            if name in names_types and name not in self.subs:
+                st = s.topics[name]
+                types = [t for t in names_types[name] if t in TEMP_TYPES]
+                if not types:
+                    st.error = f"unexpected type {names_types[name]} (accepted: {list(TEMP_TYPES)})"
+                    continue
+                st.available = True
+                st.decoded = True
+                st.type = types[0]
+                self._subscribe("temperature", name, types[0])
+
         # publisher counts and availability for everything we track
         for name, st in list(s.topics.items()):
             st.available = name in names_types
@@ -272,6 +290,8 @@ class RosSource:
         handler = self._handler_for(role, type_str)
         if role == "status_flag":
             handler = lambda m, now, _name=name: self._on_flag(_name, m, now)  # noqa: E731
+        if role == "temperature":
+            handler = lambda m, now, _name=name: self._on_temperature(_name, m, now)  # noqa: E731
 
         def cb(raw: Any) -> None:
             now = time.monotonic()
@@ -328,7 +348,7 @@ class RosSource:
             return self._on_diagnostics
         if role == "cmd_vel":
             return self._on_cmd_vel
-        if role == "status_flag":
+        if role in ("status_flag", "temperature"):
             return lambda m, now, _short=short: None  # replaced per topic in _make_callback
         return None
 
@@ -455,6 +475,19 @@ class RosSource:
                 del self.diag_items[k]
         items = [{k: v for k, v in it.items() if k != "rx"} for it in self.diag_items.values()]
         set_diagnostics(self.store, items)
+
+    def _on_temperature(self, name: str, msg: Any, now: float) -> None:
+        st = self.store.topics.get(name)
+        if st is None:
+            return
+        raw = msg.temperature if hasattr(msg, "temperature") else msg.data
+        scale = 1.0
+        for tt in self.cfg.get("temperature_topics") or []:
+            if tt["name"] == name:
+                scale = float(tt.get("scale", 1.0))
+        value = float(raw) * scale
+        if math.isfinite(value):
+            st.temp_value = value
 
     def _on_flag(self, name: str, msg: Any, now: float) -> None:
         st = self.store.topics.get(name)

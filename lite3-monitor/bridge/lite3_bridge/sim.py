@@ -316,6 +316,17 @@ class SimSource:
             s.register_topic("extra", extra["name"], expected_hz=extra.get("expected_hz"),
                              min_hz=extra.get("min_hz"), available=True, subscribed=True, publishers=1,
                              type="(simulated)")
+        # Robot temperatures: the configured topics, or (if none are configured) two
+        # clearly-labelled simulated ones so the Temperatures graph can be tried.
+        self._temp_topics = list(self.cfg.get("temperature_topics") or []) or [
+            {"name": "/sim/robot_body_temperature", "label": "Robot body (sim)", "warn_c": 60, "crit_c": 70},
+            {"name": "/sim/motor_temperature_max", "label": "Hottest leg motor (sim)", "warn_c": 70, "crit_c": 85},
+        ]
+        for tt in self._temp_topics:
+            s.register_topic("temperature", tt["name"], label=tt.get("label") or tt["name"], min_hz=tt.get("min_hz", 0.5),
+                             temp_warn=tt.get("warn_c"), temp_crit=tt.get("crit_c"), available=True, subscribed=True,
+                             publishers=1, decoded=True, type="sensor_msgs/msg/Temperature",
+                             publisher_nodes=["/lite3_driver"])
         for flag in self.cfg.get("status_flags") or []:
             st = s.register_topic("status_flag", flag["name"], label=flag.get("label") or flag["name"],
                                   expected_hz=flag.get("expected_hz"), min_hz=flag.get("min_hz"),
@@ -397,6 +408,7 @@ class SimSource:
             self._publish_diag()
             self._publish_paths()
             self._publish_flags()
+            self._publish_temps()
         if now - t["frontier"] >= 3.0:
             t["frontier"] = now
             self._publish_frontiers(self.explorer.frontier_centroids)
@@ -649,6 +661,21 @@ class SimSource:
             s.frontiers = {"count": len(centroids), "points": [[round(x, 2), round(y, 2)] for x, y in centroids],
                            "frame": "map", "rx": time.monotonic()}
         s.topic_rx(self._role_name("frontiers") or "/frontiers")
+
+    def _publish_temps(self) -> None:
+        """Robot temperatures: rise while walking, cool while standing, plus slow noise."""
+        moving = abs(self.v) > 0.05 or abs(self.w) > 0.1
+        self._heat = getattr(self, "_heat", 0.0)
+        self._heat = min(1.0, self._heat + 0.004) if moving else max(0.0, self._heat - 0.006)
+        t = time.time()
+        for i, tt in enumerate(self._temp_topics):
+            st = self.store.topics.get(tt["name"])
+            if st is None:
+                continue
+            warn = float(tt.get("warn_c") or 60)
+            base = warn - 22 + 4 * math.sin(t / 50.0 + i)
+            st.temp_value = round(base + 30 * self._heat + self.rng.gauss(0, 0.3), 1)
+            self.store.topic_rx(tt["name"], 1)
 
     def _publish_flags(self) -> None:
         """Robot-reported 'is alive' booleans; the IMU one goes false during the IMU fault."""

@@ -124,6 +124,10 @@ export interface TopicHealth {
   label?: string | null;
   /** Serialized data received per second (null = size unknown / not measured). */
   bytes_per_s?: number | null;
+  /** For role "temperature": latest robot temperature (°C) and thresholds. */
+  temp_c?: number | null;
+  temp_warn_c?: number | null;
+  temp_crit_c?: number | null;
 }
 
 /** CPU / memory of the machine running the bridge (the NUC), grouped by component. */
@@ -137,6 +141,11 @@ export interface ComputeStats {
   mem_total_mb: number | null;
   temps: { label: string; c: number }[];
   temp_max_c: number | null;
+  temp_warn_c?: number;
+  temp_crit_c?: number;
+  cpu_mhz?: number | null; // current average CPU clock
+  cpu_max_mhz?: number | null;
+  throttle_count?: number | null; // cumulative thermal-throttle events (null = not exposed)
   disk_free_gb: number | null;
   components: { name: string; cpu_pct: number; rss_mb: number; processes: number }[]; // cpu_pct = % of ONE core
   top: { name: string; component: string; cpu_pct: number; rss_mb: number }[];

@@ -36,3 +36,23 @@ test("link delay summary ignores failed probes", () => {
   assert.deepEqual(sum.link_rtt_ms, { median: 30, p95: 1000, max: 1000 });
   assert.equal(summarize([s(0)], []).link_rtt_ms, null);
 });
+
+test("nuc temperature summary: max and time at/above 80 °C", () => {
+  const samples = [60, 82, 85, 79, 90].map((v, i) => s(i * 1000, { nuc_temp_c: v }));
+  const sum = summarize(samples, []);
+  assert.deepEqual(sum.nuc_temp, { max_c: 90, hot_s: 3 });
+  assert.equal(summarize([s(0)], []).nuc_temp, null);
+  assert.ok(samplesToCsv(samples).split("\n")[0].includes("nuc_temp_c"));
+});
+
+import { tempLevelWithHysteresis } from "../src/lib/thermal.ts";
+
+test("temperature level has 3 °C hysteresis so readings near a threshold do not flap", () => {
+  assert.equal(tempLevelWithHysteresis(91, 80, 90, "warn"), "crit");
+  assert.equal(tempLevelWithHysteresis(88, 80, 90, "crit"), "crit"); // stays critical until < 87
+  assert.equal(tempLevelWithHysteresis(86.9, 80, 90, "crit"), "warn");
+  assert.equal(tempLevelWithHysteresis(78, 80, 90, "warn"), "warn"); // stays hot until < 77
+  assert.equal(tempLevelWithHysteresis(76, 80, 90, "warn"), "ok");
+  assert.equal(tempLevelWithHysteresis(79, 80, 90, "ok"), "ok");
+  assert.equal(tempLevelWithHysteresis(null, 80, 90, "ok"), "unknown");
+});

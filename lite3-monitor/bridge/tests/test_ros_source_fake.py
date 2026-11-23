@@ -240,3 +240,32 @@ def test_status_flags_subscribed_and_false_is_error(ros_source):
     assert not any(s.name == "/sensor_status/joint_isalive" for s in src.node.subs)
     # configured but absent from the graph -> missing
     assert h["/sensor_status/ultrasound_isalive"]["status"] == "missing"
+
+
+def test_temperature_topics(ros_source, monkeypatch):
+    from lite3_bridge import config as cfgmod
+    real_load = cfgmod.load_config
+
+    def load_with_temps(paths=None):
+        c = real_load(paths)
+        c["temperature_topics"] = [
+            {"name": "/robot/motor_temp", "label": "Motor", "warn_c": 70, "crit_c": 85},
+            {"name": "/robot/body_temp", "label": "Body", "warn_c": 60, "crit_c": 70, "scale": 0.1},
+        ]
+        return c
+    monkeypatch.setattr(cfgmod, "load_config", load_with_temps)
+    import lite3_bridge.config
+    monkeypatch.setattr(lite3_bridge.config, "load_config", load_with_temps)
+    from lite3_bridge.state import TelemetryStore
+    FakeNode.graph = {"/robot/motor_temp": ["sensor_msgs/msg/Temperature"], "/robot/body_temp": ["std_msgs/msg/Float32"]}
+    FakeNode.pub_info = {}
+    cfg = load_with_temps()
+    store = TelemetryStore(cfg, "ros")
+    src = ros_source.RosSource(store, cfg)
+    src.start()
+    sub_for(src, "/robot/motor_temp").cb(NS(temperature=88.0, variance=0.0))
+    sub_for(src, "/robot/body_temp").cb(NS(data=650.0))  # tenths of a degree
+    h = {t["name"]: t for t in store.health_message({})["topics"]}
+    assert h["/robot/motor_temp"]["temp_c"] == 88.0 and h["/robot/motor_temp"]["status"] == "error"
+    assert "too hot" in h["/robot/motor_temp"]["note"]
+    assert h["/robot/body_temp"]["temp_c"] == 65.0 and h["/robot/body_temp"]["label"] == "Body"

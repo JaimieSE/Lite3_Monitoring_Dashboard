@@ -108,6 +108,9 @@ export class Recorder {
       link_rtt_ms: c.linkStats.probeFailures === 0 && c.linkStats.rttLastMs != null ? Math.round(c.linkStats.rttLastMs) : null,
       transit_ms: c.link === "live" && c.linkStats.transitMs != null ? Math.round(c.linkStats.transitMs) : null,
       map_stream: c.mapLink === "live" || c.mapLink === "connecting",
+      nuc_temp_c: c.link === "live" ? c.health?.compute?.temp_max_c ?? null : null,
+      nuc_cpu_pct: c.link === "live" ? c.health?.compute?.cpu_total_pct ?? null : null,
+      robot_temp_c: c.link === "live" ? maxOrNull(c.robotTemps.map((r) => r.c)) : null,
       rates,
     };
     s.samples.push(smp);
@@ -153,4 +156,9 @@ export class Recorder {
       /* ignore */
     }
   }
+}
+
+function maxOrNull(xs: (number | null)[]): number | null {
+  const v = xs.filter((x): x is number => x != null);
+  return v.length ? Math.max(...v) : null;
 }

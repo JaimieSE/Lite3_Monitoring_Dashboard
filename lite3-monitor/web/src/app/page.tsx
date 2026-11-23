@@ -2,7 +2,8 @@
 
 import { MapView } from "@/components/MapView";
 import {
-  ComputePanel, DataRatePanel, EventLog, ExplorationPanel, HealthPanel, LiveCharts, RobotPanel, TfDiagPanel,
+  ComputePanel, DataRatePanel, EventLog, ExplorationPanel, HealthPanel, LiveCharts, RobotPanel, TemperaturePanel,
+  TfDiagPanel,
 } from "@/components/LivePanels";
 import { Panel } from "@/components/ui";
 import { useTelemetry } from "@/components/TelemetryProvider";
@@ -29,6 +30,9 @@ export default function LivePage() {
           <ExplorationPanel />
           <TfDiagPanel className="flex-1" />
         </div>
+      </div>
+      <div className="min-h-[300px]">
+        <TemperaturePanel />
       </div>
       <LiveCharts />
       <div className="grid grid-cols-12 gap-2">

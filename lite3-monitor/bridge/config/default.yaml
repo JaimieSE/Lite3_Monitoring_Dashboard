@@ -195,6 +195,15 @@ extra_health_topics:
 # Heavy topics deliberately NOT monitored: /livox/points, /livox/lidar,
 # /camera/depth/points, /camera/*/image_raw (see docs/SAFETY.md, resource use).
 
+# Robot temperatures (motors, body, battery...). Accepted types: sensor_msgs/Temperature,
+# std_msgs/Float32, std_msgs/Float64 (value in degrees C; use `scale` if not, e.g. 0.1).
+# Not found on group8's domain 8 yet (2026-11-23) - add the topic here once the team
+# knows it (e.g. after bridging it into domain 8). In the simulator, two simulated
+# robot temperatures are shown while this list is empty.
+temperature_topics: []
+#  - {name: "/robot/motor_temperature_max", label: "Hottest leg motor", warn_c: 70, crit_c: 85}
+#  - {name: "/robot/body_temperature", label: "Robot body", warn_c: 60, crit_c: 70}
+
 # std_msgs/Bool "is alive" topics published by the robot (group8). Shown as
 # green/red chips; a false value or no update for > 3 s is flagged as an error.
 status_flags:
@@ -225,6 +234,11 @@ sim:
 compute:
   enabled: true
   interval_s: 2.0
+  # NUC temperature thresholds (hottest sensor). Intel CPUs usually throttle near
+  # 95-100 C; warn early so the team can cool the robot before performance drops.
+  temperature:
+    warn_c: 80
+    crit_c: 90
   components:
     - {name: "This monitor", match: ["lite3_bridge"]}
     - {name: "Camera driver", match: ["orbbec", "astra", "camera"]}
