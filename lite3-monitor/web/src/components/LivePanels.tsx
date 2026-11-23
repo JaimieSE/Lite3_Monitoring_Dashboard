@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useTelemetry } from "./TelemetryProvider";
 import { Dot, Metric, Panel, StatusPill, topicLevel, type Level } from "./ui";
 import { TimeSeriesChart, type Series } from "./TimeSeriesChart";
@@ -643,6 +643,10 @@ export function TemperaturePanel() {
   robot.forEach((r, i) => {
     series.push({ key: r.name, label: r.label, color: TEMP_SLOTS[(i + 1) % TEMP_SLOTS.length], points: pts.map((p) => ({ x: p.t, y: p.robot[r.label] ?? null })) });
   });
+  const peers = client.identityProblem ? [] : client.health?.peers ?? [];
+  peers.forEach((pe, i) => {
+    series.push({ key: `peer-${pe.name}`, label: pe.name, color: TEMP_SLOTS[(robot.length + i + 1) % TEMP_SLOTS.length], points: pts.map((p) => ({ x: p.t, y: p.robot[pe.name] ?? null })) });
+  });
   const warnRef = c?.temp_warn_c ?? robot.find((r) => r.warn != null)?.warn ?? 80;
   return (
     <Panel
@@ -685,6 +689,16 @@ export function TemperaturePanel() {
                 sub={r.status === "missing" ? `${r.name} not found` : `warn ${r.warn ?? "—"} · critical ${r.crit ?? "—"} °C`}
               />
             ))}
+            {peers.map((pe, i) => (
+              <TempTile
+                key={`peer-${pe.name}`}
+                title={pe.name}
+                c={pe.online ? pe.stats?.temp_max_c ?? null : null}
+                level={!pe.online ? "crit" : levelOf(client.peerTempLevel(pe.name))}
+                slot={TEMP_SLOTS[(robot.length + i + 1) % TEMP_SLOTS.length]}
+                sub={!pe.online ? "offline" : pe.stats ? `warn ${pe.temp_warn_c} · critical ${pe.temp_crit_c} °C` : "online · reporter not running"}
+              />
+            ))}
             {robot.length === 0 ? (
               <div className="rounded border border-dashed border-line px-2.5 py-2 text-2xs text-faint">
                 Robot temperature: no source configured. The robot does not publish motor / body temperatures on
@@ -712,6 +726,105 @@ export function TemperaturePanel() {
             </div>
           </div>
         </div>
+      </LiveGate>
+    </Panel>
+  );
+}
+
+const THROTTLE_LABELS: [string, string][] = [
+  ["under_voltage", "Under-voltage"],
+  ["throttled", "CPU throttled"],
+  ["freq_capped", "Clock capped"],
+  ["soft_temp_limit", "Soft temp limit"],
+];
+
+/** Helper computers on the robot (Raspberry Pi): reachability, power, temperature, resources. */
+export function PeerPanel() {
+  const { client } = useTelemetry();
+  const peers = client.identityProblem ? [] : client.health?.peers ?? [];
+  const live = client.link === "live";
+  if (!peers.length) {
+    return (
+      <Panel title="Raspberry Pi" className="h-full">
+        <div className="px-3 py-2 text-2xs text-faint">
+          No helper computer configured. Add it under <span className="num text-muted">peers</span> in
+          <span className="num text-muted"> bridge/config/local.yaml</span> on the NUC (see the start-up manual).
+        </div>
+      </Panel>
+    );
+  }
+  return (
+    <Panel title={peers.length === 1 ? peers[0].name : "Helper computers"} className="h-full" bodyClass="overflow-auto scroll-thin">
+      <LiveGate live={live}>
+        {peers.map((pe) => {
+          const st = pe.stats;
+          const th = st?.throttle ?? null;
+          const tl = client.peerTempLevel(pe.name);
+          return (
+            <div key={pe.name} className="border-b border-line/60 px-3 py-2 last:border-b-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusPill level={pe.online ? "good" : "crit"} className={!pe.online ? "lost-pulse" : ""}>
+                  {pe.online ? `online · ${pe.rtt_ms} ms` : "offline"}
+                </StatusPill>
+                {pe.identity_ok === false ? <StatusPill level="crit">wrong device: {st?.hostname}</StatusPill> : null}
+                {pe.identity_ok === true ? <span className="num text-2xs text-good">● {st?.hostname} verified</span> : null}
+                {!pe.online && pe.last_seen_age_s != null ? (
+                  <span className="text-2xs text-faint">last seen {fmtAge(pe.last_seen_age_s)} ago</span>
+                ) : null}
+              </div>
+              {st ? (
+                <>
+                  <div className="mt-1 truncate text-2xs text-faint">{st.model ?? "unknown model"} · up {fmtDuration(st.uptime_s)}</div>
+                  <div className="mt-2 grid grid-cols-4 gap-x-3 gap-y-2">
+                    <Metric label="Temperature" value={fmt(st.temp_max_c, 1)} unit="°C"
+                      level={tl === "crit" ? "crit" : tl === "warn" ? "warn" : tl === "ok" ? "good" : undefined} />
+                    <Metric label="CPU" value={fmt(st.cpu_total_pct, 0)} unit="%"
+                      sub={st.cpu_mhz != null ? `${st.cpu_mhz}/${st.cpu_max_mhz} MHz` : undefined} />
+                    <Metric label="Memory" value={st.mem_used_mb == null ? "—" : (st.mem_used_mb / 1024).toFixed(1)}
+                      unit={st.mem_total_mb ? `/ ${(st.mem_total_mb / 1024).toFixed(1)} GB` : "GB"} />
+                    <Metric label="SD free" value={fmt(st.disk_free_gb, 1)} unit="GB"
+                      level={st.disk_free_gb != null && st.disk_free_gb < 2 ? "warn" : undefined} />
+                  </div>
+                  <div className="mt-2 text-2xs">
+                    <div className="mb-1 text-faint">
+                      Power &amp; throttling <span className="num">{st.throttled_raw ?? ""}</span>
+                    </div>
+                    {th ? (
+                      <div className="grid grid-cols-[auto_auto_auto] gap-x-3 gap-y-0.5">
+                        <span />
+                        <span className="text-faint">now</span>
+                        <span className="text-faint">since boot</span>
+                        {THROTTLE_LABELS.map(([k, label]) => (
+                          <Fragment key={k}>
+                            <span className="text-muted">{label}</span>
+                            <span>{th[`${k}_now`] ? <StatusPill level="crit">yes</StatusPill> : <span className="text-good">● no</span>}</span>
+                            <span>{th[`${k}_occurred`] ? <span className="text-warn">▲ yes</span> : <span className="text-faint">no</span>}</span>
+                          </Fragment>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-faint">not available on this device</span>
+                    )}
+                    {th?.under_voltage_now || th?.under_voltage_occurred ? (
+                      <div className="mt-1 text-warn">
+                        ▲ Under-voltage means the Pi&apos;s power supply is too weak (e.g. powered from the NUC&apos;s USB-C).
+                        Use a proper 5 V / 3 A (Pi 4) or 5 A (Pi 5) supply.
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <div className="mt-1 text-2xs text-faint">
+                  {pe.online
+                    ? pe.stats_configured
+                      ? `Health reporter not answering (${pe.stats_error ?? "no data"}). Start it on the Pi - see the start-up manual.`
+                      : "Reachability only. Start the read-only reporter on the Pi for power, temperature and SD space."
+                    : pe.error ?? "not reachable"}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </LiveGate>
     </Panel>
   );

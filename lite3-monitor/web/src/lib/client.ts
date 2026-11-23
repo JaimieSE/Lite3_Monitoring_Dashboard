@@ -213,6 +213,7 @@ export class TelemetryClient {
   private highLatency = false;
   private prevTempLevel: TempLevel = "unknown";
   private robotTempLevels = new Map<string, TempLevel>();
+  private peerPrev = new Map<string, { online: boolean; uv: boolean; thr: boolean; id: boolean | null; tl: TempLevel }>();
   private prevThrottle: number | null = null;
   private throttleEpisode: { start: number; events: number } | null = null;
   private lastThrottleAt = 0;
@@ -452,6 +453,7 @@ export class TelemetryClient {
       this.temps = [];
       this.tempPeak = null;
       this.robotTempLevels.clear();
+      this.peerPrev.clear();
       this.probes = [];
       this.transits = [];
       this.prevTopicStatus.clear();
@@ -563,10 +565,15 @@ export class TelemetryClient {
       }
       this.robotTempLevels.set(rt.name, lv);
     }
+    // Helper computers (Raspberry Pi): their temperature joins the graph as "<name>".
+    for (const pe of h.peers ?? []) {
+      robot[pe.name] = pe.online ? pe.stats?.temp_max_c ?? null : null;
+      this.peerEvents(pe);
+    }
     const c = h.compute && !h.compute.error ? h.compute : null;
     const sensors: Record<string, number> = {};
     for (const t of c?.temps.slice(0, 4) ?? []) sensors[t.label] = t.c;
-    if (c || this.robotTemps.length) {
+    if (c || this.robotTemps.length || (h.peers ?? []).length) {
       this.temps.push({ t: now, max: c?.temp_max_c ?? null, sensors, robot });
       cap(this.temps, 1800); // 30 min at 1 Hz
     }
@@ -601,6 +608,34 @@ export class TelemetryClient {
   }
 
   private nucTempLevel: TempLevel = "unknown";
+
+  private peerEvents(pe: import("./types").PeerStatus) {
+    const prev = this.peerPrev.get(pe.name);
+    const th = pe.stats?.throttle ?? null;
+    const uv = !!th?.under_voltage_now;
+    const thr = !!(th?.throttled_now || th?.freq_capped_now);
+    const tl = tempLevelWithHysteresis(pe.online ? pe.stats?.temp_max_c ?? null : null, pe.temp_warn_c, pe.temp_crit_c, prev?.tl ?? "unknown");
+    if (prev) {
+      if (prev.online && !pe.online) this.emit("error", "peer", `${pe.name} OFFLINE (not answering on the network)`);
+      if (!prev.online && pe.online) this.emit("info", "peer", `${pe.name} back online (${pe.rtt_ms} ms)`);
+      if (!prev.uv && uv) this.emit("error", "peer", `${pe.name} UNDER-VOLTAGE: power supply too weak - it may slow down or reboot`);
+      if (prev.uv && !uv && pe.online) this.emit("info", "peer", `${pe.name} power back to normal`);
+      if (!prev.thr && thr) this.emit("warn", "peer", `${pe.name} is throttling its CPU (power or heat)`);
+      if (tl !== prev.tl && tl !== "unknown") {
+        if (tl === "crit") this.emit("error", "thermal", `${pe.name} OVERHEATING: ${pe.stats?.temp_max_c} °C`);
+        else if (tl === "warn") this.emit("warn", "thermal", `${pe.name} hot: ${pe.stats?.temp_max_c} °C`);
+        else if (prev.tl === "warn" || prev.tl === "crit") this.emit("info", "thermal", `${pe.name} temperature back to normal`);
+      }
+    }
+    if (pe.identity_ok === false && prev?.id !== false) {
+      this.emit("error", "identity", `${pe.name}: hostname "${pe.stats?.hostname}" is not the expected "${pe.expected_hostname}" - check the address`);
+    }
+    this.peerPrev.set(pe.name, { online: pe.online, uv, thr, id: pe.identity_ok, tl });
+  }
+
+  peerTempLevel(name: string): TempLevel {
+    return this.peerPrev.get(name)?.tl ?? "unknown";
+  }
 
   /** Current NUC temperature level (bridge-configured thresholds, with 3 °C hysteresis). */
   get tempLevel(): TempLevel {

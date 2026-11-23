@@ -120,6 +120,35 @@ If any of these is wrong → §4 Troubleshooting.
 
 ---
 
+## 1b. Raspberry Pi monitoring (one-time setup)
+
+The dashboard's **Raspberry Pi** panel (and `Pi …` pill in the top bar) shows whether
+the Pi is online, its power problems (under-voltage / throttling), temperature, CPU,
+memory and SD-card space. Nothing in this section changes the robot.
+
+1. **Tell the bridge where the Pi is** - on the NUC (address stays out of git):
+   ```bash
+   cat > ~/Lite3_Monitoring_Dashboard/lite3-monitor/bridge/config/local.yaml <<'EOF'
+   peers:
+     - {name: "Raspberry Pi", host: "<pi-ip>", expected_hostname: "group8pi", stats_port: 8766}
+   EOF
+   ```
+   Restart the bridge (§3, then Step 1). Online/offline + response time now work.
+2. **Health reporter on the Pi** (optional, team approval needed - it runs a small
+   read-only program on the Pi; standard Python only, nothing installed):
+   ```bash
+   ssh <pi-user>@<pi-ip>
+   git clone -b claude/gallant-hamilton-q50da3 https://github.com/jaimiese/Lite3_Monitoring_Dashboard.git   # once
+   tmux new -s pireport
+   cd ~/Lite3_Monitoring_Dashboard/lite3-monitor/bridge
+   python3 -m lite3_bridge.pi_reporter --allow-from <nuc-ip>
+   ```
+   Ctrl+B then D to leave it running. Only the NUC's address may read it; it answers one
+   read-only request (`/stats`) and runs no commands.
+
+If the panel says "reporter not answering" while the Pi is online, the reporter is not
+running, or the network blocks port 8766 between the NUC and the Pi.
+
 ## 2. During a run
 
 - **Recording** starts automatically. Press **STOP** (top bar) at the end of a test
@@ -173,6 +202,8 @@ Recorded sessions stay on your laptop: **History** tab → export **JSON / CSV**
 | Robot box does not move | Check System health: `/leg_odom2` must be green ≈ 200 Hz. If missing, the robot's driver / domain bridge on the NUC is not running. |
 | A sensor chip is red (**NOT alive**) | The robot itself reports that sensor as dead — check the robot, not the monitor. |
 | **delay** amber/orange, spikes | Busy Wi-Fi. Fewer viewers, move closer to the access point. |
+| **Pi under-voltage** (red) | The Pi's power supply is too weak - very common when powered from the NUC's USB-C. It may slow down or reboot. Use a proper 5 V / 3 A (Pi 4) or 5 A (Pi 5) supply. |
+| **Pi offline** | Pi crashed, rebooted or lost Wi-Fi. Check its power LED and network. |
 | **NUC 9x °C** red / "throttling" | The NUC is overheating and slowing its CPU. Pause, improve airflow, check the fan; navigation may lag until it cools. |
 | No `NUC °C` pill at all | The NUC exposes no temperature sensors to normal users (rare). Check `ls /sys/class/hwmon`. |
 | Asked for the password again and again | Normal after every Wi-Fi drop. Set up an SSH key to avoid it ([TEAM_SETUP.md](TEAM_SETUP.md) §3). |

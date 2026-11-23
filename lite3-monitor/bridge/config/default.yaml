@@ -249,3 +249,11 @@ compute:
                                          "bt_navigator", "navigation", "slam", "octomap"]}
     - {name: "Robot driver", match: ["lite3_", "deep_robotics", "jueying", "deeprobotics"]}
     - {name: "RViz", match: ["rviz"]}
+
+# Helper computers on the robot (e.g. a Raspberry Pi), checked from the NUC:
+# reachability = TCP connect to the SSH port (no login, no credentials); optional
+# health from lite3_bridge.pi_reporter running on the peer (stats_port).
+# Put addresses in config/local.yaml on the NUC (git-ignored), not in shared files.
+peers: []
+#  - {name: "Raspberry Pi", host: "192.168.x.y", expected_hostname: "mypi", ssh_port: 22,
+#     stats_port: 8766, temp_warn_c: 75, temp_crit_c: 82}

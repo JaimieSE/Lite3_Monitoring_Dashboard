@@ -346,3 +346,63 @@ def test_pose_jump_breaks_trail_and_adds_no_distance():
     assert tr.distance < 0.2, tr.distance  # only the real 0.15 m step
     pts = tr.trail_payload(t)["points"]
     assert None in pts and pts[-1] == [5.85, -2.2]
+
+
+def test_throttle_decoding():
+    from lite3_bridge.pi_reporter import decode_throttled
+    f = decode_throttled(0x50005)  # classic "under-voltage now + throttled now, both occurred"
+    assert f["under_voltage_now"] and f["throttled_now"] and f["under_voltage_occurred"] and f["throttled_occurred"]
+    assert not f["freq_capped_now"] and not f["soft_temp_limit_occurred"]
+    assert not any(decode_throttled(0).values())
+
+
+def test_pi_reporter_and_peer_monitor_end_to_end():
+    import threading
+    from http.server import ThreadingHTTPServer
+    from lite3_bridge.peers import PeerMonitor, fetch_stats, tcp_probe
+    from lite3_bridge.pi_reporter import make_handler
+    from lite3_bridge.system_stats import SystemStats
+    stats = SystemStats({"compute": {"components": []}}, simulated=False)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(stats, ["127.0.0.1"]))
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        r = fetch_stats("127.0.0.1", port)
+        assert r["stats"]["hostname"] and "throttle" in r["stats"] and "temp_max_c" in r["stats"]
+        assert tcp_probe("127.0.0.1", port)["online"]
+        mon = PeerMonitor({"peers": [{"name": "Pi", "host": "127.0.0.1", "ssh_port": port, "stats_port": port,
+                                      "expected_hostname": "definitely-not-this-host"}]}, simulated=False)
+        out = mon.sample()[0]
+        assert out["online"] and out["rtt_ms"] is not None and out["stats"] and out["identity_ok"] is False
+    finally:
+        srv.shutdown()
+    # refused when the client is not allow-listed
+    srv2 = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(stats, ["10.9.9.9"]))
+    threading.Thread(target=srv2.serve_forever, daemon=True).start()
+    try:
+        assert fetch_stats("127.0.0.1", srv2.server_address[1])["stats"] is None
+    finally:
+        srv2.shutdown()
+    # nothing listening -> offline, no exception
+    assert tcp_probe("127.0.0.1", 1, timeout=0.5)["online"] is False
+
+
+def test_pi_reporter_requires_allow_list():
+    from lite3_bridge.pi_reporter import main
+    assert main([]) == 2
+
+
+def test_simulated_peer_in_health():
+    src, app, _ = _sim_app()
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws") as ws:
+                deadline = time.time() + 8
+                peers = None
+                while time.time() < deadline and not peers:
+                    m = ws.receive_json()
+                    if m["type"] == "health" and m.get("peers"):
+                        peers = m["peers"]
+                assert peers and peers[0]["name"].endswith("(sim)") and peers[0]["stats"]["throttle"] is not None
+    finally:
+        src.stop()

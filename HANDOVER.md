@@ -23,6 +23,7 @@ work session so the next human or agent (e.g. Codex) can continue.
 | Copy bridge to NUC (`deploy-bridge.sh` or `git clone` on the NUC) | YES | team, in chat, 2026-11-23 |
 | pip install into the lite3-monitor `.venv` on NUC | YES | team, in chat, 2026-11-23 |
 | Run bridge on NUC | YES | team, in chat, 2026-11-23 |
+| Run read-only `pi_reporter` on the Raspberry Pi (group8pi) | NOT YET - ask team | |
 
 Agents: do not perform an action until its row says YES.
 
@@ -31,6 +32,10 @@ Agents: do not perform an action until its row says YES.
 - NUC hostname: `group8` · `ROS_DOMAIN_ID=8` (set in the team's shell environment,
   not visible to non-interactive SSH shells) · RMW: default · Python 3.10.12 ·
   workspace `~/lite3_ws` · NUC has internet (pip install possible).
+- Raspberry Pi added: hostname `group8pi`, on the same Wi-Fi (RI_Network), powered by
+  USB-C from the NUC (under-voltage risk). Its address lives only in the NUC's
+  git-ignored `bridge/config/local.yaml` (`peers`). The team shared the Pi password in
+  chat; it was NOT stored anywhere - recommend they change it and use SSH keys.
 - SSH from the team's Mac works. IP address and username are kept only in each
   laptop's git-ignored `scripts/*/robot.env`, never in this repo.
 
@@ -257,3 +262,18 @@ _(empty — to be filled by the reviewer)_
   dashboard event + "N position jumps ignored". Also: first rate/bytes reading is no
   longer halved; the group8 simulator test no longer depends on machine speed (it
   failed on Windows CI). 36 bridge tests, 5 web tests, typecheck, audit.
+- 2026-11-23 · Claude Code · Raspberry Pi monitoring. `peers.py` (NUC bridge): TCP
+  connect to the peer's SSH port (no login, no credentials) for online/RTT; optional
+  GET /stats from `pi_reporter.py`, which runs on the Pi with the standard library only
+  (reads /proc, /sys incl. firmware `get_throttled` and rpi_volt alarm; no commands; GET
+  /stats only; refuses to start without `--allow-from`, answers only those IPs).
+  `health.peers` -> dashboard "Raspberry Pi" panel (online/RTT, hostname verification,
+  power & throttling now / since boot with advice, temperature, CPU, memory, SD), `Pi …`
+  pill, events (offline/online, under-voltage, throttling, overheating with hysteresis,
+  wrong device), Pi temperature on the Temperatures graph. Simulator has a simulated Pi
+  with periodic under-voltage and a short outage. 40 bridge tests (reporter end-to-end
+  incl. allow-list refusal), web tests, typecheck, build, audit, browser check.
+  Also noted from a new `ros2 node list`: Nav2 + slam_toolbox + laser_mapping +
+  pointcloud_to_laserscan + lite3_terrain_monitor now run on domain 8; two nodes named
+  `/rviz` (duplicate names). Next: re-run discovery with navigation running and re-enable
+  map / nav / scan / terrain layers in the group8 profile.

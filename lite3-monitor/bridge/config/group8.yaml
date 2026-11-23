@@ -39,3 +39,8 @@ topics:
   frontiers: {candidates: []}
   diagnostics: {candidates: []}
   cmd_vel: {candidates: []}
+
+# The Raspberry Pi (hostname group8pi). Its ADDRESS is set in config/local.yaml on the
+# NUC (git-ignored), e.g.:
+#   peers:
+#     - {name: "Raspberry Pi", host: "<pi-ip>", expected_hostname: "group8pi", stats_port: 8766}

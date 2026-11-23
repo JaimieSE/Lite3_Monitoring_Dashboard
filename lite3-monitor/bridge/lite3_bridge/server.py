@@ -31,6 +31,7 @@ from . import __version__
 from .mapcodec import encode_map, grid_stats
 from .state import TelemetryStore
 from .system_stats import SystemStats
+from .peers import PeerMonitor
 
 log = logging.getLogger("lite3_bridge.server")
 
@@ -84,6 +85,8 @@ class Broadcaster:
         self.map_busy = False
         self.messages_sent = 0
         self.sysstats = SystemStats(cfg, simulated=store.mode == "sim")
+        self.peermon = PeerMonitor(cfg, simulated=store.mode == "sim")
+        self.peers: list = []
         self.compute: Optional[Dict[str, Any]] = None
         self.compute_busy = False
         self.compute_next = 0.0
@@ -92,6 +95,8 @@ class Broadcaster:
     async def _sample_compute(self) -> None:
         try:
             self.compute = await asyncio.to_thread(self.sysstats.sample)
+            if self.peermon.peers:
+                self.peers = await asyncio.to_thread(self.peermon.sample)
         except Exception:
             log.exception("compute stats failed")
         finally:
@@ -148,6 +153,7 @@ class Broadcaster:
                         "map_bytes": len(self.map_cached or "") if self.map_clients else 0,
                     })
                     health["compute"] = self.compute
+                    health["peers"] = self.peers
                     if self.clients:
                         self._publish("health", health)
                 if not self.compute_busy and t0 >= self.compute_next:

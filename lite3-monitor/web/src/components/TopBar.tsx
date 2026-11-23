@@ -72,6 +72,7 @@ export function TopBar() {
             <LinkDelay />
             <NucTemp />
             <RobotTempPill />
+            <PeerPills />
           </span>
 
           <span className="h-4 w-px bg-line" />
@@ -179,5 +180,30 @@ function RobotTempPill() {
         <span className="normal-case tracking-normal">Robot {Math.round(hottest.c ?? 0)} °C{rts.length > 1 ? ` (${hottest.label.replace(" (sim)", "")})` : ""}</span>
       </StatusPill>
     </span>
+  );
+}
+
+/** One pill per helper computer (Raspberry Pi): offline / under-voltage / ok. */
+function PeerPills() {
+  const { client } = useTelemetry();
+  const peers = client.identityProblem ? [] : client.health?.peers ?? [];
+  return (
+    <>
+      {peers.map((pe) => {
+        const th = pe.stats?.throttle;
+        const short = pe.name.replace(/Raspberry Pi/i, "Pi").replace(" (sim)", "");
+        const problem = !pe.online ? "offline" : th?.under_voltage_now ? "under-voltage" : th?.throttled_now ? "throttled" : pe.identity_ok === false ? "wrong device" : null;
+        const level: Level = client.link !== "live" ? "idle" : !pe.online || th?.under_voltage_now || pe.identity_ok === false ? "crit" : th?.throttled_now ? "warn" : "good";
+        return (
+          <span key={pe.name} title={`${pe.name}: ${pe.online ? `online, ${pe.rtt_ms} ms` : "offline"}${pe.stats?.temp_max_c != null ? `, ${pe.stats.temp_max_c} °C` : ""}`}>
+            <StatusPill level={level} className={level === "crit" && client.link === "live" ? "lost-pulse" : ""}>
+              <span className="normal-case tracking-normal">
+                {short} {problem ?? (pe.stats?.temp_max_c != null ? `${Math.round(pe.stats.temp_max_c)} °C` : "ok")}
+              </span>
+            </StatusPill>
+          </span>
+        );
+      })}
+    </>
   );
 }

@@ -180,6 +180,7 @@ export interface HealthMsg {
   } | null;
   source: { ok: boolean; message: string };
   compute?: ComputeStats | null;
+  peers?: PeerStatus[];
   bridge: {
     clients: number;
     map_clients: number;
@@ -270,4 +271,41 @@ export interface DashboardConfig {
   bridgeUrl: string;
   expectedHostname: string | null;
   expectedDomainId: number | null;
+}
+
+/** A helper computer on the robot (e.g. the Raspberry Pi), checked from the NUC. */
+export interface PeerStatus {
+  name: string;
+  host_label: string;
+  online: boolean;
+  rtt_ms: number | null;
+  banner: string | null;
+  error?: string | null;
+  last_seen_age_s: number | null;
+  stats_configured: boolean;
+  stats: PeerStats | null;
+  stats_error?: string | null;
+  expected_hostname: string | null;
+  identity_ok: boolean | null;
+  temp_warn_c: number;
+  temp_crit_c: number;
+}
+
+export interface PeerStats {
+  hostname: string;
+  model: string | null;
+  uptime_s: number | null;
+  throttled_raw: string | null;
+  throttle: Record<string, boolean> | null;
+  cpu_total_pct: number | null;
+  load1: number | null;
+  cores: number | null;
+  mem_used_mb: number | null;
+  mem_total_mb: number | null;
+  temps: { label: string; c: number }[];
+  temp_max_c: number | null;
+  disk_free_gb: number | null;
+  disk_total_gb: number | null;
+  cpu_mhz: number | null;
+  cpu_max_mhz: number | null;
 }
