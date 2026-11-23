@@ -28,6 +28,7 @@ autonomous exploration competition.
 
 ## Quick start
 
+**Running it on the robot every day: [docs/STARTUP_MANUAL.md](docs/STARTUP_MANUAL.md).**
 **Team-mates (Mac or Windows, several viewers at once): see [docs/TEAM_SETUP.md](docs/TEAM_SETUP.md).**
 
 Windows (PowerShell):

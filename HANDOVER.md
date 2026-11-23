@@ -13,7 +13,7 @@ work session so the next human or agent (e.g. Codex) can continue.
 | Dashboard (Next.js 15, TS, Tailwind) | Implemented: Live page (map, cards, trends, health, TF/diagnostics, events), History page (list, detail, compare ≤4, CSV/JSON export). Builds; screenshots in `lite3-monitor/docs/img/`. |
 | Scripts | macOS: install, start-sim, start-robot (auto-reconnect tunnel), discover-remote (zero-footprint), deploy-bridge. NUC: install (venv), start-bridge. NUC/robot scripts **never run yet**. |
 | Safety | Static audit (`tools/check_readonly.py`), runtime audit in `RosSource._audit`, loopback bind, identity checks. |
-| NUC integration | **Blocked – awaiting approval + details** (see below). |
+| NUC integration | **Live on group8 (2026-11-23)**: bridge runs on the NUC in tmux, dashboard works from the team's Mac through the SSH tunnel, map-less profile. Daily procedure: `lite3-monitor/docs/STARTUP_MANUAL.md`. |
 
 ## Approvals
 
@@ -186,3 +186,12 @@ _(empty — to be filled by the reviewer)_
   `odom_only` (via the profile) mimics group8. `start-sim --profile group8` /
   `-Profile group8`. 30 bridge tests, typecheck, build, audit; browser check: clean
   event log, trail fitted, TF "not used", sensor chips green.
+- 2026-11-23 · Claude Code · First live run on the real robot: bridge installed on the
+  NUC via `git clone` + `scripts/nuc/install.sh` (no-sudo venv fallback added), runtime
+  read-only audit passed on real rclpy ("0 publishers, 0 services, 0 clients"),
+  subscriptions created (odometry, IMU, joints, TF, sensor flags, camera/Livox info),
+  team confirmed the website works. Starting a second bridge crashed on the busy port →
+  now exits early with a clear message. Wrote `docs/STARTUP_MANUAL.md` (daily start,
+  checks, shutdown, troubleshooting, update, reinstall). Still to verify on the robot:
+  `ros2 node info /lite3_monitor_readonly` output and bridge CPU (`top`) — see
+  NUC_INTEGRATION.md checklist.
