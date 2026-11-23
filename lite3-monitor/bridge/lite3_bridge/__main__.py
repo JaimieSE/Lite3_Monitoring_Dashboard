@@ -121,6 +121,17 @@ def main(argv=None) -> None:
     for w in identity["warnings"]:
         log.warning(w)
 
+    # Fail fast (before touching ROS) if the port is taken - usually another bridge.
+    import socket as _socket
+    probe = _socket.socket(_socket.AF_INET6 if ":" in host else _socket.AF_INET, _socket.SOCK_STREAM)
+    try:
+        probe.bind((host, int(cfg["server"]["port"])))
+    except OSError:
+        sys.exit(f"Port {cfg['server']['port']} on {host} is already in use - another lite3_bridge is "
+                 "probably running (check: pgrep -af lite3_bridge). Nothing was started.")
+    finally:
+        probe.close()
+
     store = TelemetryStore(cfg, mode)
     if mode == "sim":
         from .sim import SimSource
