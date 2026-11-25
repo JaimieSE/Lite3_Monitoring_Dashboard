@@ -487,7 +487,7 @@ function Banner({ tone, title, detail, pulse }: { tone: "crit" | "warn" | "idle"
 function MapStreamToggle({ state, kbps, onToggle }: { state: string; kbps: number; onToggle: () => void }) {
   const on = state === "live" || state === "connecting";
   const disabled = state === "disabled";
-  const label = disabled ? "Map: disabled" : on ? `Map stream: on${state === "live" ? ` · ${kbps.toFixed(1)} kB/s` : " · connecting"}` : "Map stream: off";
+  const label = disabled ? "Map: disabled" : on ? `Map stream: on${state === "live" ? ` · ${kbps.toFixed(1)} kB/s` : " · waiting for /map"}` : "Map stream: off";
   return (
     <button
       onClick={onToggle}

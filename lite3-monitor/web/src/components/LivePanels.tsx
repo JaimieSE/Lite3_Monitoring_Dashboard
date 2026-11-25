@@ -278,8 +278,13 @@ export function HealthPanel() {
             })}
           </tbody>
         </table>
-        {h && (h.missing_roles.length > 0 || h.nodes.missing_expected.length > 0) ? (
+        {h && (h.missing_roles.length > 0 || (h.inactive_roles?.length ?? 0) > 0 || h.nodes.missing_expected.length > 0) ? (
           <div className="space-y-0.5 px-3 py-2 text-2xs">
+            {h.inactive_roles?.length ? (
+              <div className="text-faint">
+                Inactive until their software runs (e.g. navigation): {h.inactive_roles.join(", ")}
+              </div>
+            ) : null}
             {h.missing_roles.length ? (
               <div className="text-muted">
                 <span className="text-faint">Roles with no matching topic: </span>
@@ -825,6 +830,190 @@ export function PeerPanel() {
             </div>
           );
         })}
+      </LiveGate>
+    </Panel>
+  );
+}
+
+const LOG_LEVELS: Record<number, { label: string; cls: string }> = {
+  10: { label: "DEBUG", cls: "text-faint" },
+  20: { label: "INFO", cls: "text-muted" },
+  30: { label: "WARN", cls: "text-warn" },
+  40: { label: "ERROR", cls: "text-crit" },
+  50: { label: "FATAL", cls: "text-crit" },
+};
+
+/** Live robot log (/rosout): warnings and errors from all ROS programs, like a terminal. */
+export function RobotLogPanel() {
+  const { client } = useTelemetry();
+  const [minLevel, setMinLevel] = useState(20);
+  const [q, setQ] = useState("");
+  const live = client.link === "live";
+  const rows = [...client.robotLogs].reverse()
+    .filter((l) => l.level >= minLevel)
+    .filter((l) => !q || `${l.node} ${l.msg}`.toLowerCase().includes(q.toLowerCase()))
+    .slice(0, 200);
+  const hasRosout = !!client.health?.roles?.rosout;
+  return (
+    <Panel
+      title="Robot log"
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={
+        <span className="flex items-center gap-1">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter…"
+            className="w-24 rounded border border-line bg-panel2 px-1.5 text-2xs text-ink" />
+          {[[20, "info+"], [30, "warn+"], [40, "errors"]].map(([lv, label]) => (
+            <button key={lv as number} onClick={() => setMinLevel(lv as number)}
+              className={`rounded px-1.5 text-2xs ${minLevel === lv ? "bg-panel2 text-ink" : "text-faint hover:text-ink"}`}>
+              {label}
+            </button>
+          ))}
+        </span>
+      }
+    >
+      <LiveGate live={live}>
+        {!hasRosout ? (
+          <div className="px-3 py-2 text-2xs text-faint">No /rosout topic on this domain (the robot log appears when ROS programs publish it).</div>
+        ) : rows.length === 0 ? (
+          <div className="px-3 py-2 text-2xs text-faint">No log lines yet at this level.</div>
+        ) : null}
+        <ul className="font-mono text-2xs">
+          {rows.map((l) => {
+            const lv = LOG_LEVELS[l.level] ?? { label: String(l.level), cls: "text-muted" };
+            return (
+              <li key={`${l.id}@${l.t}`} className="flex gap-2 border-b border-line/40 px-3 py-0.5">
+                <span className="shrink-0 text-faint">{new Date(l.t * 1000).toLocaleTimeString()}</span>
+                <span className={`w-11 shrink-0 ${lv.cls}`}>{lv.label}</span>
+                <span className="w-36 shrink-0 truncate text-muted" title={l.node}>{l.node}</span>
+                <span className={`min-w-0 break-words ${l.level >= 30 ? lv.cls : "text-ink"}`}>{l.msg}</span>
+              </li>
+            );
+          })}
+        </ul>
+        {client.health?.logs_dropped ? (
+          <div className="px-3 py-1 text-2xs text-faint">{client.health.logs_dropped} lines skipped during log storms (rate limit)</div>
+        ) : null}
+      </LiveGate>
+    </Panel>
+  );
+}
+
+function legOf(joint: string): string {
+  const m = joint.match(/^([A-Za-z]{2})[_-]/);
+  return m ? m[1].toUpperCase() : "";
+}
+
+/** Robot body: posture (tilt), obstacle distance, command vs actual speed, leg effort. */
+export function BodyPanel() {
+  const { client } = useTelemetry();
+  const t = client.identityProblem ? null : client.telemetry;
+  const h = client.identityProblem ? null : client.health;
+  const live = client.link === "live";
+  const at = t?.attitude ?? null;
+  const tiltLv: Level = !at?.valid ? "idle" : client.tiltLevel === "crit" ? "crit" : client.tiltLevel === "warn" ? "warn" : "good";
+  const ranges = (h?.topics ?? []).filter((x) => x.role === "range");
+  const cmd = t?.cmd_vel;
+  const cmdFresh = cmd?.age_s != null && cmd.age_s < 1;
+  const cmdActive = cmdFresh && (Math.abs(cmd!.linear ?? 0) > 0.05 || Math.abs(cmd!.angular ?? 0) > 0.1);
+  const speed = t?.velocity?.valid ? t.velocity.speed : null;
+  const cmdState: [Level, string] = !cmdFresh
+    ? ["idle", "no command data"]
+    : !cmdActive
+      ? ["idle", "no motion commanded"]
+      : t?.exploration.stalled
+        ? ["crit", "commanded but NOT moving"]
+        : (speed ?? 0) > 0.03 || Math.abs(t?.velocity?.angular ?? 0) > 0.1
+          ? ["good", "moving as commanded"]
+          : ["warn", "commanded, not moving yet"];
+  const j = t?.joints;
+  const effMax = Math.max(1, ...(j?.effort ?? []).map((e) => Math.abs(e ?? 0)));
+  return (
+    <Panel title="Robot body" className="h-full" bodyClass="overflow-auto scroll-thin">
+      <LiveGate live={live}>
+        {/* posture */}
+        <div className="px-3 py-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="label">Posture (IMU)</span>
+            <StatusPill level={tiltLv}>{!at ? "no IMU data" : tiltLv === "crit" ? "tipping risk" : tiltLv === "warn" ? "tilted" : tiltLv === "good" ? "upright" : "stale"}</StatusPill>
+          </div>
+          <div className="grid grid-cols-4 gap-x-3">
+            <Metric label="Tilt" value={fmt(at?.tilt_deg, 1)} unit="°" level={tiltLv === "good" ? undefined : tiltLv === "idle" ? undefined : tiltLv} sub={at ? `warn ${at.tilt_warn_deg}° · crit ${at.tilt_crit_deg}°` : undefined} />
+            <Metric label="Roll" value={fmt(at?.roll_deg, 1)} unit="°" />
+            <Metric label="Pitch" value={fmt(at?.pitch_deg, 1)} unit="°" />
+            <Metric label="Accel" value={fmt(at?.acc_g, 2)} unit="g" sub={client.maxTilt ? `max tilt ${client.maxTilt.toFixed(1)}°` : undefined} />
+          </div>
+          {at ? (
+            <div className="relative mt-1.5 h-1.5 rounded-sm bg-panel2" title="tilt from upright, 0-45°">
+              <div className={`absolute inset-y-0 left-0 rounded-sm ${tiltLv === "crit" ? "bg-crit" : tiltLv === "warn" ? "bg-warn" : "bg-good"}`}
+                style={{ width: `${Math.min(100, ((at.tilt_deg ?? 0) / 45) * 100)}%` }} />
+              <div className="absolute inset-y-[-2px] w-px bg-muted" style={{ left: `${(at.tilt_warn_deg / 45) * 100}%` }} />
+              <div className="absolute inset-y-[-2px] w-px bg-muted" style={{ left: `${(at.tilt_crit_deg / 45) * 100}%` }} />
+            </div>
+          ) : null}
+        </div>
+
+        {/* obstacle distance */}
+        <div className="border-t border-line px-3 py-2">
+          <div className="label mb-1">Obstacle distance</div>
+          {ranges.length === 0 ? <div className="text-2xs text-faint">No distance sensor configured</div> : null}
+          {ranges.map((r) => {
+            const lv = client.rangeLevels.get(r.name) ?? "unknown";
+            const level: Level = r.status === "missing" ? "idle" : lv === "crit" ? "crit" : lv === "warn" ? "warn" : lv === "ok" ? "good" : "idle";
+            const max = r.range_max_m ?? 5;
+            const clear = r.range_m != null && r.range_m >= max - 0.05;
+            return (
+              <div key={r.name} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-2 text-2xs">
+                <span className="truncate text-muted">{r.label ?? r.name}</span>
+                <div className="relative h-2 rounded-sm bg-panel2">
+                  <div className={`absolute inset-y-0 left-0 rounded-sm ${level === "crit" ? "bg-crit" : level === "warn" ? "bg-warn" : "bg-s3"}`}
+                    style={{ width: `${Math.min(100, ((r.range_m ?? 0) / max) * 100)}%` }} />
+                </div>
+                <span className="flex items-center gap-1.5">
+                  <span className="num text-ink">{r.range_m == null ? "—" : clear ? `clear (≥${max} m)` : `${r.range_m.toFixed(2)} m`}</span>
+                  <StatusPill level={level}>{level === "crit" ? "very close" : level === "warn" ? "close" : level === "good" ? "ok" : "n/a"}</StatusPill>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* command vs actual */}
+        <div className="border-t border-line px-3 py-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="label">Command vs actual</span>
+            <StatusPill level={cmdState[0]}>{cmdState[1]}</StatusPill>
+          </div>
+          <div className="grid grid-cols-4 gap-x-3">
+            <Metric label="Cmd linear" value={cmdFresh ? fmt(cmd?.linear, 2) : "—"} unit="m/s" />
+            <Metric label="Actual" value={fmt(speed, 2)} unit="m/s" />
+            <Metric label="Cmd turn" value={cmdFresh ? fmt(cmd?.angular, 2) : "—"} unit="rad/s" />
+            <Metric label="Actual" value={t?.velocity?.valid ? fmt(t.velocity.angular, 2) : "—"} unit="rad/s" />
+          </div>
+          <div className="mt-0.5 text-2xs text-faint">source: {h?.roles?.cmd_vel ?? "none"}</div>
+        </div>
+
+        {/* leg effort */}
+        <div className="border-t border-line px-3 py-2">
+          <div className="label mb-1">Leg effort (joint load)</div>
+          {!j || j.names.length === 0 ? (
+            <div className="text-2xs text-faint">No joint data</div>
+          ) : j.effort.length === 0 ? (
+            <div className="text-2xs text-faint">The robot does not publish joint effort ({j.names.length} joints, positions only)</div>
+          ) : (
+            <div className="grid grid-flow-col gap-x-4" style={{ gridTemplateRows: `repeat(${Math.ceil(j.names.length / 2)}, auto)` }}>
+              {j.names.map((n, i) => (
+                <div key={n} className="grid grid-cols-[4.5rem_1fr_3rem] items-center gap-1.5 text-2xs leading-4">
+                  <span className={`truncate ${legOf(n) === "FL" || legOf(n) === "HL" ? "text-muted" : "text-faint"}`}>{n}</span>
+                  <div className="h-1.5 rounded-sm bg-panel2">
+                    <div className="h-1.5 rounded-sm bg-s1" style={{ width: `${(Math.abs(j.effort[i] ?? 0) / effMax) * 100}%` }} />
+                  </div>
+                  <span className="num text-right text-ink">{fmt(j.effort[i], 1)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </LiveGate>
     </Panel>
   );

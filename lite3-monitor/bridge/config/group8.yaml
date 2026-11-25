@@ -18,27 +18,27 @@ frames:
 
 layers:
   map:
-    # No /map on domain 8 and the team runs without it. Set true to re-enable if the
-    # map topic becomes available (e.g. bridged into domain 8).
-    enabled: false
+    # The map appears by itself whenever slam_toolbox publishes /map on domain 8
+    # (navigation running); otherwise the dashboard shows the odometry view.
+    enabled: true
 
 sim:
   # ./scripts/mac/start-sim.sh --profile group8 : simulator behaves like group8
   # (odometry only: no TF, map or navigation topics).
   odom_only: true
 
-# Roles that do not exist on domain 8: no candidates => not subscribed and not
-# reported as missing. Restore candidates here if these topics are bridged later.
+# Navigation / SLAM topics (Nav2, slam_toolbox, LIO) only exist while the team runs
+# navigation. They are "optional_roles" (default.yaml): inactive and quiet when absent,
+# switched on automatically when present. The robot's velocity command is
+# /handle_state (geometry_msgs/Twist, ~200 Hz) - used for "commanded vs actual".
 topics:
-  map: {candidates: []}
-  scan: {candidates: []}
-  global_plan: {candidates: []}
-  local_plan: {candidates: []}
-  goal: {candidates: []}
-  nav_status: {candidates: []}
-  frontiers: {candidates: []}
-  diagnostics: {candidates: []}
-  cmd_vel: {candidates: []}
+  cmd_vel:
+    candidates: ["/handle_state", "/cmd_vel"]
+
+# Ultrasound: std_msgs/Float64 in metres, 4.5 m = nothing in range (sensor maximum).
+range_topics:
+  - {name: "/us_publisher/ultrasound_distance", label: "Ultrasound (front)", warn_m: 0.5, crit_m: 0.25,
+     max_m: 4.5, expected_hz: 200, min_hz: 50}
 
 # The Raspberry Pi (hostname group8pi). Its ADDRESS is set in config/local.yaml on the
 # NUC (git-ignored), e.g.:

@@ -67,6 +67,11 @@ class TopicStat:
     temp_value: Optional[float] = None
     temp_warn: Optional[float] = None
     temp_crit: Optional[float] = None
+    # distance sensors (role "range", e.g. ultrasound): metres + thresholds (lower = worse)
+    range_m: Optional[float] = None
+    range_warn: Optional[float] = None
+    range_crit: Optional[float] = None
+    range_max: Optional[float] = None
     label: Optional[str] = None
 
 
@@ -102,6 +107,12 @@ class TelemetryStore:
         self.map_raw: Optional[Dict[str, Any]] = None
         self.map_version = 0
         self.map_stats: Optional[Dict[str, Any]] = None  # filled by the broadcaster
+        self.imu: Optional[Dict[str, Any]] = None        # roll/pitch/accel from the IMU
+        self.joints: Optional[Dict[str, Any]] = None     # latest JointState (names, effort, velocity)
+        self.logs: Deque[Dict[str, Any]] = deque(maxlen=300)  # robot log (/rosout)
+        self.log_seq = 0
+        self.logs_dropped = 0
+        self.optional_roles = set(cfg.get("optional_roles") or [])
         self.paths: Dict[str, Optional[Dict[str, Any]]] = {"global": None, "local": None}
         self.goal: Optional[Dict[str, Any]] = None
         self.nav_status: Optional[Dict[str, Any]] = None
@@ -336,6 +347,35 @@ class TelemetryStore:
         c = self.cmd_vel
         return bool(c and now - c["rx"] < 1.0 and (abs(c["linear"]) > 0.05 or abs(c["angular"]) > 0.1))
 
+    def add_log(self, level: int, node: str, msg: str, t: Optional[float] = None) -> None:
+        with self.lock:
+            self.log_seq += 1
+            self.logs.append({"id": self.log_seq, "t": t or time.time(), "level": int(level),
+                              "node": node[:64], "msg": msg[:400]})
+
+    def attitude_snapshot(self, now: float) -> Optional[Dict[str, Any]]:
+        a = self.imu
+        if a is None:
+            return None
+        att = self.cfg.get("attitude") or {}
+        roll, pitch = a["roll"], a["pitch"]
+        tilt = math.degrees(math.acos(max(-1.0, min(1.0, math.cos(roll) * math.cos(pitch)))))
+        age = now - a["rx"]
+        return {
+            "roll_deg": _r(math.degrees(roll), 1), "pitch_deg": _r(math.degrees(pitch), 1), "tilt_deg": _r(tilt, 1),
+            "acc_g": _r(a["acc"] / 9.80665, 2) if a.get("acc") is not None else None,
+            "gyro_dps": _r(math.degrees(a["gyro"]), 1) if a.get("gyro") is not None else None,
+            "source": a.get("source"), "age_s": _r(age, 2), "valid": age <= 1.0,
+            "tilt_warn_deg": float(att.get("tilt_warn_deg", 20)), "tilt_crit_deg": float(att.get("tilt_crit_deg", 35)),
+        }
+
+    def joints_snapshot(self, now: float) -> Optional[Dict[str, Any]]:
+        j = self.joints
+        if j is None:
+            return None
+        return {"names": j["names"][:24], "effort": [_r(v, 2) for v in j["effort"][:24]],
+                "velocity": [_r(v, 2) for v in j["velocity"][:24]], "age_s": _r(now - j["rx"], 2)}
+
     def telemetry_message(self) -> Dict[str, Any]:
         now = time.monotonic()
         with self.lock:
@@ -345,6 +385,8 @@ class TelemetryStore:
             nav = self.nav_snapshot(now, pose)
             expl = self.tracker.update(now, pose, vel, self.nav_active(now), self.cmd_active(now),
                                        self.frontiers, self.exploration_state)
+            att = self.attitude_snapshot(now)
+            joints = self.joints_snapshot(now)
             cmd = None
             if self.cmd_vel is not None:
                 cmd = {"linear": _r(self.cmd_vel["linear"]), "angular": _r(self.cmd_vel["angular"]),
@@ -363,6 +405,8 @@ class TelemetryStore:
             "nav": nav,
             "exploration": expl,
             "tf": ps["tf"],
+            "attitude": att,
+            "joints": joints,
         }
 
     def health_message(self, extra: Dict[str, Any]) -> Dict[str, Any]:
@@ -372,7 +416,10 @@ class TelemetryStore:
         with self.lock:
             for st in sorted(self.topics.values(), key=lambda s: (s.role, s.name)):
                 topics.append(self._topic_health(st, now))
-            missing_roles = [r for r, n in self.roles.items() if n is None and self.cfg["topics"][r]["candidates"]]
+            missing_roles = [r for r, n in self.roles.items() if n is None and self.cfg["topics"][r]["candidates"]
+                             and r not in self.optional_roles]
+            inactive_roles = [r for r, n in self.roles.items() if n is None and self.cfg["topics"][r]["candidates"]
+                              and r in self.optional_roles]
             diag = None
             if self.diagnostics is not None:
                 d = self.diagnostics
@@ -388,6 +435,9 @@ class TelemetryStore:
                 "scan_age_s": _r(now - self.graph["rx"], 1) if self.graph["rx"] else None,
             }
             roles = dict(self.roles)
+            # robot log: entries of the last 15 s (max 60); the dashboard de-duplicates by id
+            wall = time.time()
+            logs = [e for e in self.logs if wall - e["t"] <= 15.0][-60:]
             map_info = None
             if self.map_raw is not None:
                 map_info = {"version": self.map_version, "age_s": _r(now - self.map_raw["rx"], 1),
@@ -405,6 +455,9 @@ class TelemetryStore:
             "nodes": nodes,
             "diagnostics": diag,
             "map": map_info,
+            "logs": logs,
+            "logs_dropped": self.logs_dropped,
+            "inactive_roles": inactive_roles,
             "source": source,
             "bridge": dict(extra, uptime_s=_r(now - self.started, 1), tf_dropped=tf_dropped, mode=self.mode),
         }
@@ -413,7 +466,10 @@ class TelemetryStore:
         age = None if st.last_rx is None else now - st.last_rx
         status = "ok"
         notes: List[str] = []
-        if not st.available:
+        if not st.available and st.role in self.optional_roles:
+            status = "idle"
+            notes.append("inactive (optional - e.g. navigation not running)")
+        elif not st.available:
             status = "missing"
             notes.append("not in ROS graph")
         elif st.error:
@@ -442,6 +498,13 @@ class TelemetryStore:
             elif st.temp_warn is not None and st.temp_value >= st.temp_warn:
                 status = "warn"
                 notes.insert(0, f"hot: {st.temp_value:.1f} °C ≥ {st.temp_warn:g} °C")
+        if st.role == "range" and st.range_m is not None and status in ("ok", "warn", "idle"):
+            if st.range_crit is not None and st.range_m <= st.range_crit:
+                status = "error"
+                notes.insert(0, f"obstacle very close: {st.range_m:.2f} m")
+            elif st.range_warn is not None and st.range_m <= st.range_warn:
+                status = "warn"
+                notes.insert(0, f"obstacle close: {st.range_m:.2f} m")
         if st.role == "status_flag" and st.flag_value is False and status != "missing":
             status = "error"
             notes.insert(0, "reports NOT alive")
@@ -467,6 +530,10 @@ class TelemetryStore:
             "label": st.label,
             "bytes_per_s": _r(st.bytes_per_s, 0) if st.bytes_known else None,
             "temp_c": _r(st.temp_value, 1),
+            "range_m": _r(st.range_m, 3),
+            "range_warn_m": st.range_warn,
+            "range_crit_m": st.range_crit,
+            "range_max_m": st.range_max,
             "temp_warn_c": st.temp_warn,
             "temp_crit_c": st.temp_crit,
         }

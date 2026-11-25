@@ -29,6 +29,10 @@ export interface Sample {
   nuc_cpu_pct?: number | null;
   /** Hottest robot temperature source (°C), if any are configured. Added in v0.3. */
   robot_temp_c?: number | null;
+  /** Body tilt from upright (degrees). Added in v0.4. */
+  tilt_deg?: number | null;
+  /** Nearest obstacle from distance sensors (m). Added in v0.4. */
+  obstacle_m?: number | null;
   rates: Record<string, number | null>;
 }
 
@@ -63,6 +67,8 @@ export interface SessionSummary {
   nuc_temp?: { max_c: number; hot_s: number } | null;
   /** Hottest robot temperature seen during the session. */
   robot_temp_max_c?: number | null;
+  max_tilt_deg?: number | null;
+  min_obstacle_m?: number | null;
   link_lost_s: number;
   stall_events: number;
   error_events: number;

@@ -277,3 +277,13 @@ _(empty — to be filled by the reviewer)_
   pointcloud_to_laserscan + lite3_terrain_monitor now run on domain 8; two nodes named
   `/rviz` (duplicate names). Next: re-run discovery with navigation running and re-enable
   map / nav / scan / terrain layers in the group8 profile.
+- 2026-11-25 · Claude Code · Monitoring that needs no navigation: IMU posture (roll /
+  pitch / tilt from orientation, or from gravity when orientation is absent; warn 20°,
+  crit 35°, hysteresis), leg effort from /joint_states, ultrasound as a `range_topics`
+  entry (/us_publisher/ultrasound_distance, metres, 4.5 m = clear; warn 0.5, crit 0.25),
+  command vs actual using /handle_state (Twist, robot velocity command - confirmed by
+  team echo), robot log panel from /rosout (rate-capped 40/s, last 15 s in health,
+  de-dup by id+t, ERROR+ also as events). Navigation roles are `optional_roles`: idle /
+  "inactive" when absent, auto-subscribed when present; group8 map layer re-enabled.
+  Simulator: stumbles, efforts, ultrasound ray-cast, logs. 44 bridge tests, web tests,
+  typecheck, audit, browser check.

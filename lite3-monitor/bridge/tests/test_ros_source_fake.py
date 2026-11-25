@@ -269,3 +269,22 @@ def test_temperature_topics(ros_source, monkeypatch):
     assert h["/robot/motor_temp"]["temp_c"] == 88.0 and h["/robot/motor_temp"]["status"] == "error"
     assert "too hot" in h["/robot/motor_temp"]["note"]
     assert h["/robot/body_temp"]["temp_c"] == 65.0 and h["/robot/body_temp"]["label"] == "Body"
+
+
+def test_imu_joints_rosout_handlers(ros_source):
+    src, store = make(ros_source, {"/imu/data": ["sensor_msgs/msg/Imu"], "/joint_states": ["sensor_msgs/msg/JointState"],
+                                   "/rosout": ["rcl_interfaces/msg/Log"]})
+    v = lambda x, y, z: NS(x=x, y=y, z=z)  # noqa: E731
+    # no orientation (covariance[0] = -1): tilt estimated from gravity, 30 deg roll
+    import math as _m
+    imu = NS(orientation=NS(x=0.0, y=0.0, z=0.0, w=0.0), orientation_covariance=[-1.0] + [0.0] * 8,
+             linear_acceleration=v(0.0, 9.81 * _m.sin(_m.radians(30)), 9.81 * _m.cos(_m.radians(30))),
+             angular_velocity=v(0.0, 0.0, 0.0))
+    sub_for(src, "/imu/data").cb(imu)
+    att = store.attitude_snapshot(time.monotonic())
+    assert abs(att["roll_deg"] - 30.0) < 0.5 and att["source"] == "accelerometer"
+    sub_for(src, "/joint_states").cb(NS(name=["FL_Knee", "FR_Knee"], position=[0.1, 0.2], velocity=[1.0, 2.0],
+                                        effort=[5.0, 6.0]))
+    assert store.joints["effort"] == [5.0, 6.0]
+    sub_for(src, "/rosout").cb(NS(level=b"\x1e", name="planner_server", msg="hello"))
+    assert store.logs[-1]["level"] == 30 and store.logs[-1]["node"] == "planner_server"

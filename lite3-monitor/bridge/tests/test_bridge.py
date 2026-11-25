@@ -230,7 +230,10 @@ def test_several_viewers_at_once_and_limit():
 def test_group8_profile_stacks_and_tf_optional():
     cfg = load_config([str(ROOT / "bridge" / "config" / "group8.yaml")])
     assert cfg["identity"]["expected_hostname"] == "group8" and cfg["identity"]["expected_ros_domain_id"] == 8
-    assert cfg["layers"]["map"]["enabled"] is False and cfg["frames"]["tf_required"] is False
+    # map layer on: it appears by itself when navigation publishes /map; TF stays optional
+    assert cfg["layers"]["map"]["enabled"] is True and cfg["frames"]["tf_required"] is False
+    assert cfg["topics"]["cmd_vel"]["candidates"][0] == "/handle_state"
+    assert cfg["range_topics"][0]["name"] == "/us_publisher/ultrasound_distance"
     assert cfg["topics"]["odometry"]["candidates"][0] == "/leg_odom2"  # defaults still present
     store = TelemetryStore(cfg, "ros")
     store.odom = {"x": 1.0, "y": 2.0, "yaw": 0.0, "frame": "odom", "vx": 0.1, "vy": 0.0, "wz": 0.0,
@@ -406,3 +409,51 @@ def test_simulated_peer_in_health():
                 assert peers and peers[0]["name"].endswith("(sim)") and peers[0]["stats"]["throttle"] is not None
     finally:
         src.stop()
+
+
+def test_optional_roles_are_inactive_not_missing():
+    s = make_store()
+    s.register_topic("map", "/map", available=False)
+    s.register_topic("odometry", "/leg_odom2", available=False, min_hz=10)
+    s.roles["scan"] = None
+    h = s.health_message({})
+    t = {x["name"]: x for x in h["topics"]}
+    assert t["/map"]["status"] == "idle" and "inactive" in t["/map"]["note"]
+    assert t["/leg_odom2"]["status"] == "missing"          # required roles still alarm
+    assert "scan" in h["inactive_roles"] and "scan" not in h["missing_roles"]
+
+
+def test_attitude_joints_range_and_logs():
+    s = make_store()
+    now = time.monotonic()
+    s.imu = {"roll": math.radians(30), "pitch": 0.0, "acc": 9.81, "gyro": 0.1, "source": "orientation", "rx": now}
+    s.joints = {"names": ["FL_Knee"], "effort": [12.345], "velocity": [0.5], "rx": now}
+    tel = s.telemetry_message()
+    assert abs(tel["attitude"]["tilt_deg"] - 30.0) < 0.2 and tel["attitude"]["valid"]
+    assert tel["attitude"]["tilt_warn_deg"] == 20 and tel["joints"]["effort"] == [12.35]
+    s.register_topic("range", "/us", available=True, range_warn=0.5, range_crit=0.25, range_max=4.5)
+    s.topic_rx("/us")
+    s.topics["/us"].range_m = 0.2
+    s.add_log(40, "planner_server", "failed to create plan")
+    h = s.health_message({})
+    us = {x["name"]: x for x in h["topics"]}["/us"]
+    assert us["status"] == "error" and "very close" in us["note"] and us["range_m"] == 0.2
+    assert h["logs"][-1]["msg"] == "failed to create plan" and h["logs"][-1]["level"] == 40
+
+
+def test_sim_group8_has_body_data_and_command():
+    from lite3_bridge.sim import SimSource
+    cfg = load_config([str(ROOT / "bridge" / "config" / "group8.yaml")])
+    cfg["sim"]["topic_faults"] = False
+    store = TelemetryStore(cfg, "sim")
+    src = SimSource(store, cfg)
+    src._register()
+    now = 1000.0
+    for _ in range(int(20 / src.DT)):
+        now += src.DT
+        src.tick(now)
+    tel = store.telemetry_message()
+    assert tel["attitude"] is not None and len(tel["joints"]["names"]) == 12
+    assert tel["cmd_vel"] is not None  # /handle_state is the command source on group8
+    h = {t["name"]: t for t in store.health_message({})["topics"]}
+    assert h["/us_publisher/ultrasound_distance"]["range_m"] is not None

@@ -37,9 +37,12 @@ NODE_NAME = "lite3_monitor_readonly"
 
 # Roles whose content we decode. Everything else is counted only.
 DECODED_ROLES = {"map", "odometry", "tf", "tf_static", "global_plan", "local_plan", "goal", "nav_status",
-                 "frontiers", "exploration_state", "diagnostics", "cmd_vel", "status_flag", "temperature"}
+                 "frontiers", "exploration_state", "diagnostics", "cmd_vel", "status_flag", "temperature",
+                 "imu", "joint_states", "rosout", "range"}
 # Rare / latched roles: always decode (never throttled).
-UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state", "status_flag"}
+UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state", "status_flag", "rosout"}
+RANGE_TYPES = ("sensor_msgs/msg/Range", "std_msgs/msg/Float32", "std_msgs/msg/Float64")
+LOG_MAX_PER_S = 40.0
 FLAG_TYPE = "std_msgs/msg/Bool"
 TEMP_TYPES = ("sensor_msgs/msg/Temperature", "std_msgs/msg/Float32", "std_msgs/msg/Float64")
 # Roles where we prefer RELIABLE (if every publisher offers it) so large or
@@ -151,6 +154,11 @@ class RosSource:
         for extra in self.cfg.get("extra_health_topics") or []:
             self.store.register_topic("extra", extra["name"], expected_hz=extra.get("expected_hz"),
                                       min_hz=extra.get("min_hz"))
+        for rt in self.cfg.get("range_topics") or []:
+            self.store.register_topic("range", rt["name"], label=rt.get("label") or rt["name"],
+                                      expected_hz=rt.get("expected_hz"), min_hz=rt.get("min_hz"),
+                                      range_warn=rt.get("warn_m"), range_crit=rt.get("crit_m"),
+                                      range_max=rt.get("max_m"))
         for tt in self.cfg.get("temperature_topics") or []:
             self.store.register_topic("temperature", tt["name"], label=tt.get("label") or tt["name"],
                                       expected_hz=tt.get("expected_hz"), min_hz=tt.get("min_hz"),
@@ -230,6 +238,19 @@ class RosSource:
                 st.type = types[0]
                 self._subscribe("temperature", name, types[0])
 
+        for rt in self.cfg.get("range_topics") or []:
+            name = rt["name"]
+            if name in names_types and name not in self.subs:
+                st = s.topics[name]
+                types = [t for t in names_types[name] if t in RANGE_TYPES]
+                if not types:
+                    st.error = f"unexpected type {names_types[name]} (accepted: {list(RANGE_TYPES)})"
+                    continue
+                st.available = True
+                st.decoded = True
+                st.type = types[0]
+                self._subscribe("range", name, types[0])
+
         # publisher counts and availability for everything we track
         for name, st in list(s.topics.items()):
             st.available = name in names_types
@@ -292,6 +313,8 @@ class RosSource:
             handler = lambda m, now, _name=name: self._on_flag(_name, m, now)  # noqa: E731
         if role == "temperature":
             handler = lambda m, now, _name=name: self._on_temperature(_name, m, now)  # noqa: E731
+        if role == "range":
+            handler = lambda m, now, _name=name: self._on_range(_name, m, now)  # noqa: E731
 
         def cb(raw: Any) -> None:
             now = time.monotonic()
@@ -348,7 +371,13 @@ class RosSource:
             return self._on_diagnostics
         if role == "cmd_vel":
             return self._on_cmd_vel
-        if role in ("status_flag", "temperature"):
+        if role == "imu":
+            return self._on_imu
+        if role == "joint_states":
+            return self._on_joints
+        if role == "rosout":
+            return self._on_rosout
+        if role in ("status_flag", "temperature", "range"):
             return lambda m, now, _short=short: None  # replaced per topic in _make_callback
         return None
 
@@ -475,6 +504,54 @@ class RosSource:
                 del self.diag_items[k]
         items = [{k: v for k, v in it.items() if k != "rx"} for it in self.diag_items.values()]
         set_diagnostics(self.store, items)
+
+    def _on_range(self, name: str, msg: Any, now: float) -> None:
+        st = self.store.topics.get(name)
+        if st is None:
+            return
+        value = float(msg.range if hasattr(msg, "range") else msg.data)
+        if math.isfinite(value):
+            st.range_m = value
+
+    def _on_imu(self, msg: Any, now: float) -> None:
+        o = msg.orientation
+        a = msg.linear_acceleration
+        g = msg.angular_velocity
+        cov0 = msg.orientation_covariance[0] if len(msg.orientation_covariance) else 0.0
+        if cov0 != -1.0 and (o.x, o.y, o.z, o.w) != (0.0, 0.0, 0.0, 0.0):
+            # roll / pitch from the orientation quaternion
+            roll = math.atan2(2 * (o.w * o.x + o.y * o.z), 1 - 2 * (o.x * o.x + o.y * o.y))
+            pitch = math.asin(max(-1.0, min(1.0, 2 * (o.w * o.y - o.z * o.x))))
+            source = "orientation"
+        else:
+            # no orientation: estimate from gravity (valid when not accelerating hard)
+            roll = math.atan2(a.y, a.z)
+            pitch = math.atan2(-a.x, math.hypot(a.y, a.z))
+            source = "accelerometer"
+        with self.store.lock:
+            self.store.imu = {"roll": roll, "pitch": pitch, "acc": math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z),
+                              "gyro": math.sqrt(g.x * g.x + g.y * g.y + g.z * g.z), "source": source, "rx": now}
+
+    def _on_joints(self, msg: Any, now: float) -> None:
+        names = list(msg.name)
+        effort = [float(v) for v in msg.effort] if len(msg.effort) else []
+        velocity = [float(v) for v in msg.velocity] if len(msg.velocity) else []
+        with self.store.lock:
+            self.store.joints = {"names": names, "effort": effort, "velocity": velocity, "rx": now}
+
+    def _on_rosout(self, msg: Any, now: float) -> None:
+        # cap the rate so a log storm cannot load the bridge
+        self.log_budget = min(LOG_MAX_PER_S, getattr(self, "log_budget", LOG_MAX_PER_S)
+                              + (now - getattr(self, "log_budget_t", now)) * LOG_MAX_PER_S)
+        self.log_budget_t = now
+        if self.log_budget < 1.0:
+            self.store.logs_dropped += 1
+            return
+        self.log_budget -= 1.0
+        lvl = msg.level
+        if isinstance(lvl, (bytes, bytearray)):
+            lvl = lvl[0]
+        self.store.add_log(int(lvl), str(msg.name), str(msg.msg))
 
     def _on_temperature(self, name: str, msg: Any, now: float) -> None:
         st = self.store.topics.get(name)

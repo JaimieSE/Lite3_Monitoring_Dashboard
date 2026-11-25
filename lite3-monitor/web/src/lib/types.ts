@@ -93,6 +93,8 @@ export interface TelemetryMsg {
   cmd_vel: { linear: number | null; angular: number | null; age_s: number | null } | null;
   nav: NavInfo;
   exploration: Exploration;
+  attitude?: Attitude | null;
+  joints?: { names: string[]; effort: (number | null)[]; velocity: (number | null)[]; age_s: number } | null;
   tf: {
     base_frame: string | null;
     chain: TfEdgeInfo[];
@@ -127,6 +129,11 @@ export interface TopicHealth {
   label?: string | null;
   /** Serialized data received per second (null = size unknown / not measured). */
   bytes_per_s?: number | null;
+  /** For role "range" (ultrasound etc.): distance in metres; lower is worse. */
+  range_m?: number | null;
+  range_warn_m?: number | null;
+  range_crit_m?: number | null;
+  range_max_m?: number | null;
   /** For role "temperature": latest robot temperature (°C) and thresholds. */
   temp_c?: number | null;
   temp_warn_c?: number | null;
@@ -181,6 +188,9 @@ export interface HealthMsg {
   source: { ok: boolean; message: string };
   compute?: ComputeStats | null;
   peers?: PeerStatus[];
+  logs?: RobotLog[];
+  logs_dropped?: number;
+  inactive_roles?: string[];
   bridge: {
     clients: number;
     map_clients: number;
@@ -308,4 +318,26 @@ export interface PeerStats {
   disk_total_gb: number | null;
   cpu_mhz: number | null;
   cpu_max_mhz: number | null;
+}
+
+export interface Attitude {
+  roll_deg: number | null;
+  pitch_deg: number | null;
+  tilt_deg: number | null;
+  acc_g: number | null;
+  gyro_dps: number | null;
+  source: string | null;
+  age_s: number;
+  valid: boolean;
+  tilt_warn_deg: number;
+  tilt_crit_deg: number;
+}
+
+/** One robot log line from /rosout. level: 10 debug, 20 info, 30 warn, 40 error, 50 fatal. */
+export interface RobotLog {
+  id: number;
+  t: number;
+  level: number;
+  node: string;
+  msg: string;
 }

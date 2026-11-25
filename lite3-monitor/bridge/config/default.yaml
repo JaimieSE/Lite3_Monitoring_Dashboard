@@ -175,6 +175,30 @@ topics:
     min_hz: null
     single_publisher: false
 
+  rosout:
+    # Robot log messages (warnings / errors of all ROS programs). Rate-capped.
+    candidates: ["/rosout"]
+    types: ["rcl_interfaces/msg/Log"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: false
+
+# Roles that only exist while optional software (navigation, SLAM, exploration) runs.
+# While absent they are shown as "inactive", never as errors; they switch on by
+# themselves as soon as their topics appear (graph re-scan every few seconds).
+optional_roles: [map, scan, global_plan, local_plan, goal, nav_status, frontiers, exploration_state,
+                 diagnostics, cmd_vel, rosout]
+
+# Robot posture from the IMU: tilt = angle from upright (combines roll and pitch).
+attitude:
+  tilt_warn_deg: 20
+  tilt_crit_deg: 35
+
+# Distance sensors (ultrasound / range finders): metres; LOWER is worse.
+# Accepted types: sensor_msgs/Range, std_msgs/Float32, std_msgs/Float64.
+range_topics: []
+#  - {name: "/us_publisher/ultrasound_distance", label: "Ultrasound (front)", warn_m: 0.5, crit_m: 0.25, max_m: 4.5}
+
 # Extra topics to rate-monitor only (raw subscription, never decoded).
 # Point clouds are intentionally NOT listed by default: even an undecoded
 # subscription receives the full payload. Add them only if needed.
@@ -190,9 +214,6 @@ extra_health_topics:
   - name: "/camera/depth/camera_info"
     expected_hz: 30
     min_hz: 10
-  - name: "/us_publisher/ultrasound_distance"
-    expected_hz: 200     # measured 199.9 Hz on group8
-    min_hz: 50
 # Heavy topics deliberately NOT monitored: /livox/points, /livox/lidar,
 # /camera/depth/points, /camera/*/image_raw (see docs/SAFETY.md, resource use).
 

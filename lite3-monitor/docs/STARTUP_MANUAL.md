@@ -155,6 +155,13 @@ running, or the network blocks port 8766 between the NUC and the Pi.
   run; press **Record session** to start the next one.
 - **Map stream** button is shown as "Map: disabled" — expected, we run without a map.
 - **Event log** (bottom right) lists every warning: stalls, sensor dropouts, link loss.
+- **Robot body**: posture from the IMU (tilt warning at 20°, tipping risk at 35°), front
+  ultrasound distance (close < 0.5 m, very close < 0.25 m, "clear" = nothing within 4.5 m),
+  commanded vs actual speed (`/handle_state`), and load per leg motor.
+- **Robot log**: warnings and errors of every ROS program (/rosout), filterable; errors
+  also appear in the Event log.
+- Navigation / map panels switch on by themselves when navigation runs and stay quiet
+  ("inactive") when it does not.
 - **Temperatures** (graph under the map) shows the NUC's hottest sensor and any robot
   temperatures over the last 1–30 min. The top bar always shows `NUC xx °C` (amber ≥ 80 °C,
   red ≥ 90 °C, "· throttling" when the CPU slows itself down) and `Robot xx °C` once a

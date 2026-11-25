@@ -255,6 +255,8 @@ function SummaryGrid({ s }: { s: Session }) {
     ["Link delay", sm.link_rtt_ms ? `${sm.link_rtt_ms.median} ms (p95 ${sm.link_rtt_ms.p95})` : "n/a"],
     ["NUC max temp", sm.nuc_temp ? `${sm.nuc_temp.max_c} °C (${sm.nuc_temp.hot_s} s ≥ 80 °C)` : "n/a"],
     ["Robot max temp", sm.robot_temp_max_c != null ? `${sm.robot_temp_max_c} °C` : "n/a"],
+    ["Max tilt", sm.max_tilt_deg != null ? `${sm.max_tilt_deg.toFixed(1)}°` : "n/a"],
+    ["Closest obstacle", sm.min_obstacle_m != null ? `${sm.min_obstacle_m.toFixed(2)} m` : "n/a"],
     ["Stalls", String(sm.stall_events)],
     ["Errors / warns", `${sm.error_events} / ${sm.warn_events}`],
   ];
@@ -297,6 +299,7 @@ function Compare({ sessions }: { sessions: Session[] }) {
     ["Link delay median / p95 (ms)", (s) => (s.summary.link_rtt_ms ? `${s.summary.link_rtt_ms.median} / ${s.summary.link_rtt_ms.p95}` : "—")],
     ["NUC max temp (°C) / time ≥ 80 °C", (s) => (s.summary.nuc_temp ? `${s.summary.nuc_temp.max_c} / ${s.summary.nuc_temp.hot_s} s` : "—")],
     ["Robot max temp (°C)", (s) => (s.summary.robot_temp_max_c != null ? String(s.summary.robot_temp_max_c) : "—")],
+    ["Max tilt (°) / closest obstacle (m)", (s) => `${s.summary.max_tilt_deg != null ? s.summary.max_tilt_deg.toFixed(1) : "—"} / ${s.summary.min_obstacle_m != null ? s.summary.min_obstacle_m.toFixed(2) : "—"}`],
     ["Stall events", (s) => String(s.summary.stall_events)],
     ["Errors / warnings", (s) => `${s.summary.error_events} / ${s.summary.warn_events}`],
     [`${topic} avg Hz (min)`, (s) => (s.summary.topic_rates[topic] ? `${fmt(s.summary.topic_rates[topic].avg, 1)} (${fmt(s.summary.topic_rates[topic].min, 1)})` : "—")],

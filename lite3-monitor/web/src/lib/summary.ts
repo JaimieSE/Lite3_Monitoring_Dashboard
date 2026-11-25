@@ -46,6 +46,8 @@ export function summarize(samples: Sample[], events: SessionEvent[]): SessionSum
   const pct = (q: number) => rtts[Math.min(rtts.length - 1, Math.floor(q * rtts.length))];
   const temps = samples.map((s) => s.nuc_temp_c).filter((v): v is number => v != null);
   const robotTemps = samples.map((s) => s.robot_temp_c).filter((v): v is number => v != null);
+  const tilts = samples.map((s) => s.tilt_deg).filter((v): v is number => v != null);
+  const obstacles = samples.map((s) => s.obstacle_m).filter((v): v is number => v != null);
   let hotMs = 0;
   for (let i = 1; i < n; i++) {
     const tc = samples[i].nuc_temp_c;
@@ -72,6 +74,8 @@ export function summarize(samples: Sample[], events: SessionEvent[]): SessionSum
     link_rtt_ms: rtts.length ? { median: pct(0.5), p95: pct(0.95), max: rtts[rtts.length - 1] } : null,
     nuc_temp: temps.length ? { max_c: Math.max(...temps), hot_s: round(hotMs / 1000, 0) } : null,
     robot_temp_max_c: robotTemps.length ? Math.max(...robotTemps) : null,
+    max_tilt_deg: tilts.length ? Math.max(...tilts) : null,
+    min_obstacle_m: obstacles.length ? Math.min(...obstacles) : null,
     link_lost_s: round(lostMs / 1000, 1),
     stall_events: events.filter((e) => e.kind === "stall" && e.level !== "info").length,
     error_events: events.filter((e) => e.level === "error").length,
@@ -88,7 +92,7 @@ function round(v: number, d = 2): number {
 const CSV_FIXED = [
   "t_iso", "t_ms", "elapsed_s", "link", "pose_valid", "x", "y", "yaw", "frame", "speed", "linear", "angular",
   "cmd_linear", "state", "frontiers", "distance_m", "known_area_m2", "coverage_pct", "link_rtt_ms", "transit_ms",
-  "map_stream", "nuc_temp_c", "nuc_cpu_pct", "robot_temp_c",
+  "map_stream", "nuc_temp_c", "nuc_cpu_pct", "robot_temp_c", "tilt_deg", "obstacle_m",
 ] as const;
 
 function csvCell(v: unknown): string {
@@ -105,7 +109,7 @@ export function samplesToCsv(samples: Sample[]): string {
     const fixed = [
       new Date(s.t).toISOString(), s.t, ((s.t - t0) / 1000).toFixed(1), s.link, s.pose_valid, s.x, s.y, s.yaw,
       s.frame, s.speed, s.linear, s.angular, s.cmd_linear, s.state, s.frontiers, s.distance_m, s.known_area_m2,
-      s.coverage_pct, s.link_rtt_ms, s.transit_ms, s.map_stream, s.nuc_temp_c, s.nuc_cpu_pct, s.robot_temp_c,
+      s.coverage_pct, s.link_rtt_ms, s.transit_ms, s.map_stream, s.nuc_temp_c, s.nuc_cpu_pct, s.robot_temp_c, s.tilt_deg, s.obstacle_m,
     ];
     return [...fixed, ...topics.map((t) => s.rates[t])].map(csvCell).join(",");
   });

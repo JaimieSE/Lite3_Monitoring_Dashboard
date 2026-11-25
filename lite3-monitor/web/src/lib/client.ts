@@ -35,7 +35,7 @@ export interface TempPoint { t: number; max: number | null; sensors: Record<stri
 export interface RobotTemp { name: string; label: string; c: number | null; warn: number | null; crit: number | null; status: string }
 
 
-import { tempLevelWithHysteresis, type TempLevel } from "./thermal";
+import { lowLevelWithHysteresis, tempLevelWithHysteresis, type TempLevel } from "./thermal";
 export { tempLevelWithHysteresis, type TempLevel };
 export type MapLinkState = "off" | "disabled" | "connecting" | "live";
 
@@ -182,6 +182,12 @@ export class TelemetryClient {
   rates: RatePoint[] = [];
   coverage: CoveragePoint[] = [];
   latency: LatencyPoint[] = [];
+  /** Robot log (/rosout), newest last, de-duplicated by id. */
+  robotLogs: import("./types").RobotLog[] = [];
+  tiltLevel: TempLevel = "unknown";
+  rangeLevels = new Map<string, TempLevel>();
+  private seenLogs = new Set<string>();
+  maxTilt = 0;
   temps: TempPoint[] = [];
   /** Highest NUC temperature seen since the page was opened. */
   tempPeak: { c: number; t: number } | null = null;
@@ -454,6 +460,9 @@ export class TelemetryClient {
       this.tempPeak = null;
       this.robotTempLevels.clear();
       this.peerPrev.clear();
+      this.robotLogs = [];
+      this.seenLogs.clear();
+      this.rangeLevels.clear();
       this.probes = [];
       this.transits = [];
       this.prevTopicStatus.clear();
@@ -487,6 +496,17 @@ export class TelemetryClient {
     });
     cap(this.vel, 6000);
 
+    const at = m.attitude;
+    if (at && at.valid) {
+      const lv = tempLevelWithHysteresis(at.tilt_deg, at.tilt_warn_deg, at.tilt_crit_deg, this.tiltLevel);
+      if (lv !== this.tiltLevel && this.tiltLevel !== "unknown") {
+        if (lv === "crit") this.emit("error", "posture", `ROBOT TILTED ${at.tilt_deg}° (roll ${at.roll_deg}°, pitch ${at.pitch_deg}°) - risk of falling`);
+        else if (lv === "warn") this.emit("warn", "posture", `Robot tilted ${at.tilt_deg}° (roll ${at.roll_deg}°, pitch ${at.pitch_deg}°)`);
+        else this.emit("info", "posture", `Robot upright again (${at.tilt_deg}°)`);
+      }
+      this.tiltLevel = lv;
+      this.maxTilt = Math.max(this.maxTilt, at.tilt_deg ?? 0);
+    }
     const ex = m.exploration;
     if (ex.pose_jumps != null && ex.pose_jumps > this.prevJumps && ex.last_jump) {
       const j = ex.last_jump;
@@ -517,6 +537,26 @@ export class TelemetryClient {
 
   private onHealth(h: HealthMsg, now: number) {
     this.health = h;
+    for (const l of h.logs ?? []) {
+      // id restarts when the bridge restarts, so identify a line by id AND time
+      const key = `${l.id}@${l.t}`;
+      if (this.seenLogs.has(key)) continue;
+      this.seenLogs.add(key);
+      if (this.seenLogs.size > 2000) this.seenLogs = new Set(Array.from(this.seenLogs).slice(-1000));
+      this.robotLogs.push(l);
+      if (l.level >= 40) this.emit("error", "robotlog", `[${l.node}] ${l.msg}`);
+    }
+    cap(this.robotLogs, 500);
+    for (const t of h.topics) {
+      if (t.role !== "range") continue;
+      const prev = this.rangeLevels.get(t.name) ?? "unknown";
+      const lv = t.status === "missing" ? "unknown" : lowLevelWithHysteresis(t.range_m ?? null, t.range_warn_m ?? null, t.range_crit_m ?? null, prev);
+      if (lv !== prev && lv !== "unknown" && prev !== "unknown") {
+        if (lv === "crit") this.emit("error", "obstacle", `${t.label ?? t.name}: obstacle VERY close (${t.range_m?.toFixed(2)} m)`);
+        else if (lv === "warn") this.emit("warn", "obstacle", `${t.label ?? t.name}: obstacle close (${t.range_m?.toFixed(2)} m)`);
+      }
+      this.rangeLevels.set(t.name, lv);
+    }
     const rates: Record<string, number | null> = {};
     for (const t of h.topics) {
       rates[t.name] = t.status === "missing" ? null : t.rate_hz;

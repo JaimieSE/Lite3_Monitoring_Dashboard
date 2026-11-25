@@ -307,7 +307,7 @@ class SimSource:
         if self.odom_only:
             # /tf exists on such robots (static frames only), so it stays registered but idle.
             for role in ("map", "scan", "global_plan", "local_plan", "goal", "nav_status", "frontiers",
-                         "diagnostics", "cmd_vel"):
+                         "diagnostics"):
                 name = self._role_name(role)
                 if name in s.topics:
                     del s.topics[name]
@@ -318,6 +318,14 @@ class SimSource:
                              type="(simulated)")
         # Robot temperatures: the configured topics, or (if none are configured) two
         # clearly-labelled simulated ones so the Temperatures graph can be tried.
+        for rt in self.cfg.get("range_topics") or []:
+            s.register_topic("range", rt["name"], label=rt.get("label") or rt["name"], expected_hz=rt.get("expected_hz"),
+                             min_hz=rt.get("min_hz"), range_warn=rt.get("warn_m"), range_crit=rt.get("crit_m"),
+                             range_max=rt.get("max_m"), available=True, subscribed=True, publishers=1, decoded=True,
+                             type="std_msgs/msg/Float64", publisher_nodes=["/us_publisher"])
+        self._stumble_until = 0.0
+        self._next_stumble = time.monotonic() + 100.0
+        self._next_log = time.monotonic() + 3.0
         self._temp_topics = list(self.cfg.get("temperature_topics") or []) or [
             {"name": "/sim/robot_body_temperature", "label": "Robot body (sim)", "warn_c": 60, "crit_c": 70},
             {"name": "/sim/motor_temperature_max", "label": "Hottest leg motor (sim)", "warn_c": 70, "crit_c": 85},
@@ -409,6 +417,7 @@ class SimSource:
             self._publish_paths()
             self._publish_flags()
             self._publish_temps()
+            self._publish_logs()
         if now - t["frontier"] >= 3.0:
             t["frontier"] = now
             self._publish_frontiers(self.explorer.frontier_centroids)
@@ -587,8 +596,7 @@ class SimSource:
         with s.lock:
             s.odom = {"x": ox, "y": oy, "yaw": oyaw, "frame": "odom",
                       "vx": self.v + noise(0, 0.01), "vy": noise(0, 0.005), "wz": self.w + noise(0, 0.01), "rx": now}
-            if not self.odom_only:
-                s.cmd_vel = {"linear": self.cmd[0], "angular": self.cmd[1], "rx": now}
+            s.cmd_vel = {"linear": self.cmd[0], "angular": self.cmd[1], "rx": now}
         if not self.odom_only:
             if not self._has_fault("tf_stale"):
                 s.set_tf("map", "odom", (dx, dy, 0.0), quat_from_yaw(dth), static=False, now=now)
@@ -600,6 +608,7 @@ class SimSource:
             s.topic_rx(n("tf") or "/tf", 3, now)                                   # ~60 Hz
         s.topic_rx(n("cmd_vel") or "/cmd_vel", 1, now)                             # 20 Hz
         self._count("joint_states", None, now)
+        self._publish_body(now)
         self._count("imu", 0.2 if self._has_fault("imu_degraded") else None, now)  # fault: 20 % rate
         if not self._has_fault("scan_dropout"):
             self._count("scan", None, now)
@@ -661,6 +670,55 @@ class SimSource:
             s.frontiers = {"count": len(centroids), "points": [[round(x, 2), round(y, 2)] for x, y in centroids],
                            "frame": "map", "rx": time.monotonic()}
         s.topic_rx(self._role_name("frontiers") or "/frontiers")
+
+    JOINTS = [f"{leg}_{j}" for leg in ("FL", "FR", "HL", "HR") for j in ("HipX", "HipY", "Knee")]
+
+    def _publish_body(self, now: float) -> None:
+        """IMU attitude (with an occasional simulated stumble), joint efforts, ultrasound, robot log."""
+        s = self.store
+        t = time.time()
+        if now > self._next_stumble:
+            self._stumble_until = now + 2.5
+            self._next_stumble = now + self.rng.uniform(120, 200)
+            s.add_log(30, "lite3_motion", "large body tilt detected - recovering balance (simulated)")
+        stumble = now < self._stumble_until
+        gait = abs(self.v) / 0.55
+        roll = math.radians(1.5 * math.sin(t * 9.0) * gait + (27.0 if stumble else 0.0) + self.rng.gauss(0, 0.3))
+        pitch = math.radians(2.0 * math.sin(t * 9.0 + 1.0) * gait + (-6.0 if stumble else 0.0) + self.rng.gauss(0, 0.3))
+        acc = 9.81 * (1.0 + 0.08 * gait * math.sin(t * 18.0) + (0.6 if stumble else 0.0))
+        with s.lock:
+            s.imu = {"roll": roll, "pitch": pitch, "acc": acc, "gyro": abs(self.w) + 0.02, "source": "orientation", "rx": now}
+            eff = []
+            for i, _n in enumerate(self.JOINTS):
+                base = (6.0 if i % 3 == 2 else 2.5) * (0.6 + gait)
+                eff.append(base * (1.0 + 0.4 * math.sin(t * 9.0 + i)) + (8.0 if stumble and i % 3 == 2 else 0.0))
+            s.joints = {"names": list(self.JOINTS), "effort": eff,
+                        "velocity": [gait * 3.0 * math.sin(t * 9.0 + i) for i in range(12)], "rx": now}
+        for rt in self.cfg.get("range_topics") or []:
+            st = s.topics.get(rt["name"])
+            if st is None:
+                continue
+            mx = float(rt.get("max_m") or 4.5)
+            d = 0.05
+            while d < mx and not self.world.occupied(self.x + d * math.cos(self.yaw), self.y + d * math.sin(self.yaw)):
+                d += 0.05
+            st.range_m = round(min(d, mx) + self.rng.gauss(0, 0.01), 3)
+            self._count_name(rt["name"], float(rt.get("expected_hz") or 50), now, 12)
+
+    def _publish_logs(self) -> None:
+        now = time.monotonic()
+        if now < self._next_log:
+            return
+        self._next_log = now + self.rng.uniform(4, 12)
+        msgs = [
+            (20, "lite3_sensor_relay", "relaying 5 sensor topics to domain 8"),
+            (20, "odom_relay", "odometry stream healthy"),
+            (30, "lite3_livox_cloud", "point cloud late by 120 ms"),
+            (20, "lite3_terrain_monitor", "terrain map updated"),
+            (40, "lite3_livox_cloud", "dropped 2 point clouds (buffer full)"),
+        ]
+        lvl, node, msg = self.rng.choice(msgs)
+        self.store.add_log(lvl, node, msg + " (simulated)")
 
     def _publish_temps(self) -> None:
         """Robot temperatures: rise while walking, cool while standing, plus slow noise."""

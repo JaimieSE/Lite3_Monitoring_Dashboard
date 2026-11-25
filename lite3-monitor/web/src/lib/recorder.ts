@@ -111,6 +111,8 @@ export class Recorder {
       nuc_temp_c: c.link === "live" ? c.health?.compute?.temp_max_c ?? null : null,
       nuc_cpu_pct: c.link === "live" ? c.health?.compute?.cpu_total_pct ?? null : null,
       robot_temp_c: c.link === "live" ? maxOrNull(c.robotTemps.map((r) => r.c)) : null,
+      tilt_deg: c.link === "live" && tel?.attitude?.valid ? tel.attitude.tilt_deg : null,
+      obstacle_m: c.link === "live" ? minOrNull((c.health?.topics ?? []).filter((x) => x.role === "range").map((x) => x.range_m ?? null)) : null,
       rates,
     };
     s.samples.push(smp);
@@ -161,4 +163,9 @@ export class Recorder {
 function maxOrNull(xs: (number | null)[]): number | null {
   const v = xs.filter((x): x is number => x != null);
   return v.length ? Math.max(...v) : null;
+}
+
+function minOrNull(xs: (number | null)[]): number | null {
+  const v = xs.filter((x): x is number => x != null);
+  return v.length ? Math.min(...v) : null;
 }
