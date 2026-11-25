@@ -38,16 +38,19 @@ NODE_NAME = "lite3_monitor_readonly"
 # Roles whose content we decode. Everything else is counted only.
 DECODED_ROLES = {"map", "odometry", "tf", "tf_static", "global_plan", "local_plan", "goal", "nav_status",
                  "frontiers", "exploration_state", "diagnostics", "cmd_vel", "status_flag", "temperature",
-                 "imu", "joint_states", "rosout", "range"}
-# Rare / latched roles: always decode (never throttled).
-UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state", "status_flag", "rosout"}
+                 "imu", "joint_states", "rosout", "range", "pi_detections", "pi_scene_events"}
+# Rare / latched roles: always decode (never throttled). The Pi topics are < 1 Hz and every
+# scene event matters (a dropped result would leave a request "pending" on the dashboard).
+UNTHROTTLED_ROLES = {"map", "tf_static", "goal", "nav_status", "exploration_state", "status_flag", "rosout",
+                     "pi_detections", "pi_scene_events"}
 RANGE_TYPES = ("sensor_msgs/msg/Range", "std_msgs/msg/Float32", "std_msgs/msg/Float64")
 LOG_MAX_PER_S = 40.0
 FLAG_TYPE = "std_msgs/msg/Bool"
 TEMP_TYPES = ("sensor_msgs/msg/Temperature", "std_msgs/msg/Float32", "std_msgs/msg/Float64")
 # Roles where we prefer RELIABLE (if every publisher offers it) so large or
 # rare messages are not silently lost.
-RELIABLE_ROLES = {"map", "tf_static", "goal", "nav_status", "frontiers", "exploration_state", "global_plan"}
+RELIABLE_ROLES = {"map", "tf_static", "goal", "nav_status", "frontiers", "exploration_state", "global_plan",
+                  "pi_scene_events"}
 TF_MAX_MSGS_PER_S = 400.0
 MAX_PATH_POINTS = 300
 
@@ -377,6 +380,10 @@ class RosSource:
             return self._on_joints
         if role == "rosout":
             return self._on_rosout
+        if role == "pi_detections":
+            return lambda m, now: self.store.perception.on_detections(m.data, now)
+        if role == "pi_scene_events":
+            return lambda m, now: self.store.perception.on_scene_event(m.data, now)
         if role in ("status_flag", "temperature", "range"):
             return lambda m, now, _short=short: None  # replaced per topic in _make_callback
         return None

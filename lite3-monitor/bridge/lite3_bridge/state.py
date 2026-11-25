@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from .geom import Quat, Vec3, compose, yaw_from_quat
+from .perception import PiPerception
 
 NAV_STATUS_NAMES = {
     0: "UNKNOWN",
@@ -124,6 +125,8 @@ class TelemetryStore:
         self.source_status: Dict[str, Any] = {"ok": True, "message": ""}
 
         self.tracker = MotionTracker(cfg)
+        # Raspberry Pi perception (detections, Claude scene checks), see perception.py
+        self.perception = PiPerception(cfg.get("pi_perception"))
 
     # ------------------------------------------------------------------ topics
     def register_topic(self, role: str, name: str, **kw: Any) -> TopicStat:

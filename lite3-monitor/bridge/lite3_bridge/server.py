@@ -25,17 +25,21 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+import re
 
 from . import __version__
 from .mapcodec import encode_map, grid_stats
 from .state import TelemetryStore
 from .system_stats import SystemStats
-from .peers import PeerMonitor
+from .peers import PeerMonitor, fetch_scene_image
+from .perception import MissionReports
 
 log = logging.getLogger("lite3_bridge.server")
 
 PROTOCOL_VERSION = 2
+SCENE_ID = re.compile(r"^scene-\d{1,6}$")
+IMAGE_CACHE_MAX = 40
 SEND_TIMEOUT_S = 5.0
 # Send order when several slots are pending: small, time-critical first.
 PRIORITY = ("hello", "telemetry", "health", "paths", "map")
@@ -91,12 +95,18 @@ class Broadcaster:
         self.compute_busy = False
         self.compute_next = 0.0
         self.compute_dt = float((cfg.get("compute") or {}).get("interval_s", 2.0))
+        self.mission_reader = MissionReports(cfg.get("pi_perception"))
+        self.missions: Optional[Dict[str, Any]] = None
 
     async def _sample_compute(self) -> None:
         try:
             self.compute = await asyncio.to_thread(self.sysstats.sample)
             if self.peermon.peers:
                 self.peers = await asyncio.to_thread(self.peermon.sample)
+            if self.store.mode == "sim":
+                self.missions = self.source.sim_missions() if hasattr(self.source, "sim_missions") else None
+            else:
+                self.missions = await asyncio.to_thread(self.mission_reader.sample)
         except Exception:
             log.exception("compute stats failed")
         finally:
@@ -154,6 +164,8 @@ class Broadcaster:
                     })
                     health["compute"] = self.compute
                     health["peers"] = self.peers
+                    health["perception"] = self.store.perception.snapshot(t0)
+                    health["missions"] = self.missions
                     if self.clients:
                         self._publish("health", health)
                 if not self.compute_busy and t0 >= self.compute_next:
@@ -299,6 +311,30 @@ def create_app(store: TelemetryStore, cfg: Dict[str, Any], source: Any, identity
             frames = sorted({e.child for e in store.tf_edges.values()} | {e.parent for e in store.tf_edges.values()})
             edges = [{"parent": e.parent, "child": e.child, "static": e.static} for e in store.tf_edges.values()]
         return JSONResponse({"graph": graph, "tf_frames": frames, "tf_edges": edges, "roles": store.roles})
+
+    image_cache: "Dict[str, bytes]" = {}
+    pi_peers = [p for p in (cfg.get("peers") or []) if p.get("host") and p.get("stats_port")]
+
+    @app.get("/api/pi/scene_image")
+    async def scene_image(request_id: str = "", stamp: str = "") -> Response:
+        """The picture the Pi sent to Claude for one scene request, relayed read-only from the Pi's
+        pi_reporter (stored files only; nothing is captured). Inputs are validated and only used to
+        look up a stored file; results are cached, so each picture crosses the network once."""
+        if not (SCENE_ID.match(request_id) and stamp.isdigit() and len(stamp) <= 20):
+            return Response(status_code=400)
+        key = f"{request_id}:{stamp}"
+        data = image_cache.get(key)
+        if data is None:
+            if store.mode == "sim" or not pi_peers:
+                return Response(status_code=404)
+            peer = pi_peers[0]
+            data = await asyncio.to_thread(fetch_scene_image, peer["host"], int(peer["stats_port"]), request_id, stamp)
+            if data is None:
+                return Response(status_code=404, headers={"Cache-Control": "no-store"})
+            image_cache[key] = data
+            while len(image_cache) > IMAGE_CACHE_MAX:
+                image_cache.pop(next(iter(image_cache)))
+        return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

@@ -5,6 +5,8 @@ import { useTelemetry } from "./TelemetryProvider";
 import { Dot, Metric, Panel, StatusPill, topicLevel, type Level } from "./ui";
 import { TimeSeriesChart, type Series } from "./TimeSeriesChart";
 import { deg, fmt, fmtAge, fmtBytesRate, fmtDuration } from "@/lib/format";
+import { latestPerTask, reportOutcome, sceneImageUrl, scoreTotal } from "@/lib/perception";
+import type { MissionReport, SceneRequest } from "@/lib/types";
 
 /** Wraps live values: greys them out and labels them when they are not live. */
 function LiveGate({ live, children }: { live: boolean; children: React.ReactNode }) {
@@ -1104,6 +1106,179 @@ export function PiLinkPanel() {
           </div>
         )}
       </LiveGate>
+    </Panel>
+  );
+}
+
+/** Detections older than this are shown as not live (the Pi publishes ~0.6 frames/s). */
+const PI_DETECTIONS_STALE_S = 5;
+
+export function PiDetectionsPanel() {
+  const { client } = useTelemetry();
+  const p = client.identityProblem ? null : client.health?.perception ?? null;
+  const d = p?.latest ?? null;
+  const live = client.link === "live" && d != null && d.age_s <= PI_DETECTIONS_STALE_S;
+  return (
+    <Panel
+      title="Pi sees now"
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={d ? <span className="num text-2xs text-faint">frame {d.frame ?? "—"} · {fmtAge(d.age_s)} ago</span> : undefined}
+    >
+      {!d ? (
+        <div className="px-3 py-2 text-2xs text-faint">
+          No Pi detections received. The bridge listens on the Pi perception topics (config: topics.pi_detections).
+        </div>
+      ) : (
+        <LiveGate live={live}>
+          <div className="space-y-2 px-3 py-2 text-xs">
+            <div>
+              <div className="label">Objects</div>
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {d.objects.length ? d.objects.map((o, i) => (
+                  <span key={i} className="rounded border border-line bg-panel2 px-1.5 py-0.5">
+                    {o.name} <span className="num text-faint">{fmt(o.confidence, 2)}</span>
+                  </span>
+                )) : <span className="text-faint">none</span>}
+              </div>
+            </div>
+            <div>
+              <div className="label">QR code</div>
+              <div className="pt-0.5">{d.qr.length ? d.qr.map((q, i) => <div key={i} className="break-words">“{q}”</div>) : <span className="text-faint">none</span>}</div>
+            </div>
+            <div>
+              <div className="label">Hazard signs</div>
+              <div className="pt-0.5">
+                {d.signs.length ? d.signs.map((sg) => sg ?? "unidentified triangle").join(" · ") : <span className="text-faint">none</span>}
+              </div>
+            </div>
+            <div>
+              <div className="label">Stairs / curtain</div>
+              <div className="flex items-center gap-2 pt-0.5">
+                <StatusPill level={d.stair.reason === "confirmed" ? "good" : d.stair.reason === "timestamp_mismatch" || d.stair.reason === "stale_camera" ? "warn" : "idle"}>
+                  {d.stair.reason === "confirmed" ? d.stair.obstacle ?? "confirmed" : d.stair.reason ?? "unknown"}
+                </StatusPill>
+                {d.stair.distance_m != null ? <span className="num text-muted">{fmt(d.stair.distance_m, 2)} m</span> : null}
+              </div>
+            </div>
+            <div className="text-2xs text-faint">{p?.frames ?? 0} frames · {p?.events ?? 0} scene events received{p && p.bad_messages ? ` · ${p.bad_messages} unreadable` : ""}</div>
+          </div>
+        </LiveGate>
+      )}
+    </Panel>
+  );
+}
+
+function sceneLevel(r: SceneRequest): Level {
+  if (r.status === "failed") return "crit";
+  if (r.status === "pending") return "idle";
+  return !r.room || r.room === "unknown" ? "warn" : "good";
+}
+
+export function SceneChecksPanel() {
+  const { client } = useTelemetry();
+  const reqs = client.identityProblem ? [] : client.health?.perception?.requests ?? [];
+  const live = client.link === "live";
+  const answered = reqs.filter((r) => r.status === "result");
+  const named = answered.filter((r) => r.room && r.room !== "unknown").length;
+  return (
+    <Panel
+      title="Claude scene checks"
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={reqs.length ? <span className="num text-2xs text-faint">{named}/{answered.length} rooms named</span> : undefined}
+    >
+      {!reqs.length ? (
+        <div className="px-3 py-2 text-2xs text-faint">No Claude scene checks since the bridge started. Pictures are only shown when the Pi already stored them.</div>
+      ) : (
+        <LiveGate live={live}>
+          <div className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2">
+            {reqs.map((r) => {
+              const img = sceneImageUrl(client.bridgeUrl, r);
+              return (
+                <div key={`${r.request_id}-${r.capture_stamp_ns}`} className="rounded border border-line bg-panel2 p-1.5 text-2xs">
+                  {img ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- bridge-relayed stored JPEG
+                    <img src={img} alt={`What Claude saw for ${r.request_id}`} loading="lazy"
+                      className="mb-1 aspect-[4/3] w-full rounded object-cover"
+                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                  ) : null}
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="num font-semibold">{r.request_id}</span>
+                    <StatusPill level={sceneLevel(r)}>{r.status === "result" ? (r.room ?? "no room") : r.status}</StatusPill>
+                  </div>
+                  <div className="truncate text-muted">
+                    {r.trigger ? `${r.trigger.kind}: ${r.trigger.label}` : "—"}
+                  </div>
+                  <div className="num text-faint">
+                    {r.latency_s != null ? `answered in ${fmt(r.latency_s, 1)} s · ` : ""}{fmtAge(r.age_s)} ago
+                  </div>
+                  {r.error ? <div className="break-words text-crit">{r.error}</div> : null}
+                  {r.evidence.length ? <div className="break-words text-faint">{r.evidence.join(" · ")}</div> : null}
+                </div>
+              );
+            })}
+          </div>
+        </LiveGate>
+      )}
+    </Panel>
+  );
+}
+
+function outcomeLevel(r: MissionReport): Level {
+  const o = reportOutcome(r);
+  return o === "accepted" ? "good" : o === "dry run" ? "idle" : "crit";
+}
+
+export function MissionReportsPanel() {
+  const { client } = useTelemetry();
+  const m = client.identityProblem ? null : client.health?.missions ?? null;
+  const latest = m ? latestPerTask(m.reports) : [];
+  const total = m ? scoreTotal(m.reports) : null;
+  return (
+    <Panel
+      title="Mission reports"
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={m ? <span className="num text-2xs text-faint">{m.run}</span> : undefined}
+    >
+      {!m ? (
+        <div className="px-3 py-2 text-2xs text-faint">No mission log configured (config: pi_perception.reports_glob).</div>
+      ) : !latest.length ? (
+        <div className="px-3 py-2 text-2xs text-faint">Nothing reported in this run yet.</div>
+      ) : (
+        <LiveGate live={client.link === "live"}>
+          {total && total.scored ? (
+            <div className="px-3 pt-2">
+              <Metric label="Server score (latest per task)" value={`${total.score} / ${total.max}`} sub={`${total.scored} task(s) scored by the server`} />
+            </div>
+          ) : null}
+          <table className="mt-1 w-full text-2xs">
+            <tbody>
+              {latest.map((r) => (
+                <tr key={r.task_id} className="border-t border-line align-top">
+                  <td className="num px-3 py-1 font-semibold">{r.task_id}</td>
+                  <td className="py-1">
+                    <div className="break-words">
+                      {r.task_type === "qr" ? `“${r.message}”` : [r.scene_type || "—", r.label || null, r.pos ? `[${r.pos.join(", ")}]` : "no pos"].filter(Boolean).join(" · ")}
+                    </div>
+                    {r.evaluation ? (
+                      <div className="text-faint">
+                        {Object.entries(r.evaluation).map(([k, ok]) => `${k} ${ok ? "✔" : "✘"}`).join("  ")}
+                      </div>
+                    ) : null}
+                    {r.reason ? <div className="text-crit">{r.reason}</div> : null}
+                  </td>
+                  <td className="px-3 py-1 text-right">
+                    <StatusPill level={outcomeLevel(r)}>{reportOutcome(r)}</StatusPill>
+                    {r.score != null && r.max_score != null ? <div className="num pt-0.5 text-muted">{r.score}/{r.max_score}</div> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </LiveGate>
+      )}
     </Panel>
   );
 }

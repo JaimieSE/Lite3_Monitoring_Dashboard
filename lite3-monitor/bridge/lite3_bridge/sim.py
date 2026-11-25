@@ -418,11 +418,58 @@ class SimSource:
             self._publish_flags()
             self._publish_temps()
             self._publish_logs()
+            self._publish_perception(now)
         if now - t["frontier"] >= 3.0:
             t["frontier"] = now
             self._publish_frontiers(self.explorer.frontier_centroids)
         self._step(self.DT, now)
         self._publish_fast(self.DT, self._k)
+
+    SIM_SCENES = (("object", "hand_tools", "workshop", ["pegboard with tools", "workbench"]),
+                  ("person", "person", "unknown", []),
+                  ("warning_sign", "high_voltage", "kitchen", ["toy stove", "sink unit"]),
+                  ("qr", "My friend is in the market.", "kitchen", ["toy kitchen counter"]))
+
+    def _publish_perception(self, now: float) -> None:
+        """Simulated Pi perception: a detection record every second and a Claude scene check every 20 s
+        (pending, then a result 3 s later; every fourth one fails)."""
+        import json as _json
+        p = self.store.perception
+        k = int(now // 20)
+        kind, label, room, evidence = self.SIM_SCENES[k % len(self.SIM_SCENES)]
+        stamp = int(k * 20 * 1e9)
+        rid = f"scene-{k}"
+        p.on_detections(_json.dumps({"frame": int(now), "objects": [{"name": label, "confidence": 0.81}]
+                                     if kind in ("object", "person") else [],
+                                     "qr_codes": [{"text": label}] if kind == "qr" else [],
+                                     "warning_sign_candidates": [{"label": label}] if kind == "warning_sign" else [],
+                                     "stair_curtain": {"obstacle": "unknown", "reason": "no_confirmed_candidate"}}),
+                        now)
+        base = {"request_id": rid, "capture_stamp_ns": stamp, "frame": k, "frame_id": "camera_color_optical_frame",
+                "trigger": {"kind": kind, "label": label}, "encounter_ids": [f"{kind}-{k}"]}
+        phase = now - k * 20
+        current = p.requests.get(rid)
+        if current is None or current.get("capture_stamp_ns") != stamp:
+            p.on_scene_event(_json.dumps(dict(base, event="scene_pending")), now)
+        elif phase >= 3.0 and current["status"] == "pending":
+            if k % 4 == 3:
+                p.on_scene_event(_json.dumps(dict(base, event="scene_failed", error="TimeoutError (simulated)")), now)
+            else:
+                p.on_scene_event(_json.dumps(dict(base, event="scene_result",
+                                                  scene={"type": room, "evidence": evidence})), now)
+
+    def sim_missions(self) -> Dict:
+        """Simulated mission log (what the robot's reporter wrote and what the scoring server answered)."""
+        rows = [("M04", "qr", "", "", None, "My friend is in the market.", 5, 5, {"message": True}),
+                ("M02", "hazard", "kitchen", "high_voltage", [1.02, 0.0], "", 10, 10,
+                 {"scene_type": True, "pos": True, "label": True}),
+                ("M01", "object", "workshop", "hand_tools", [2.04, 1.02], "", 5, 10,
+                 {"scene_type": True, "pos": False, "label": True})]
+        return {"run": "competition-sim", "file_mtime": None, "reports": [
+            {"t": None, "task_id": t, "task_type": ty, "scene_type": sc, "label": la, "pos": pos, "message": msg,
+             "http_status": 200, "dry_run": False, "accepted": True, "score": score, "max_score": mx,
+             "evaluation": ev, "reason": None, "course": "A"}
+            for t, ty, sc, la, pos, msg, score, mx, ev in rows]}
 
     def _dist_to(self, p: Tuple[float, float]) -> float:
         return math.hypot(p[0] - self.x, p[1] - self.y)

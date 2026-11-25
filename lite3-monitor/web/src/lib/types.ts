@@ -188,6 +188,10 @@ export interface HealthMsg {
   source: { ok: boolean; message: string };
   compute?: ComputeStats | null;
   peers?: PeerStatus[];
+  /** Raspberry Pi perception seen on ROS (detections, Claude scene checks); null when none yet. */
+  perception?: PerceptionHealth | null;
+  /** The robot's own mission-report log (newest run); null when not configured. */
+  missions?: MissionsHealth | null;
   logs?: RobotLog[];
   logs_dropped?: number;
   inactive_roles?: string[];
@@ -345,4 +349,66 @@ export interface RobotLog {
   level: number;
   node: string;
   msg: string;
+}
+
+/** Latest detection record from the Pi (health.perception.latest). */
+export interface PiDetections {
+  frame: number | null;
+  objects: { name: string; confidence: number }[];
+  qr: string[];
+  /** Identified hazard label, or null for an unidentified yellow triangle. */
+  signs: (string | null)[];
+  stair: { obstacle: string | null; reason: string | null; distance_m: number | null };
+  age_s: number;
+}
+
+/** One Claude scene check made by the Pi (joined from scene_pending / scene_result / scene_failed). */
+export interface SceneRequest {
+  request_id: string;
+  status: "pending" | "result" | "failed";
+  trigger: { kind: string; label: string } | null;
+  encounter_ids: string[];
+  frame: number | null;
+  capture_stamp_ns: number | null;
+  room: string | null;
+  evidence: string[];
+  error: string | null;
+  latency_s: number | null;
+  /** Bridge wall-clock seconds when the bridge first saw the request. */
+  requested_at: number;
+  age_s: number;
+}
+
+export interface PerceptionHealth {
+  latest: PiDetections | null;
+  frames: number;
+  events: number;
+  bad_messages: number;
+  /** Newest first. */
+  requests: SceneRequest[];
+}
+
+/** One line of the robot's mission_reports.jsonl: what was POSTed and what the scoring server answered. */
+export interface MissionReport {
+  t: number | null;
+  task_id: string;
+  task_type: string;
+  scene_type: string;
+  label: string;
+  pos: [number, number] | null;
+  message: string;
+  http_status: number | null;
+  dry_run: boolean;
+  accepted: boolean;
+  score: number | null;
+  max_score: number | null;
+  evaluation: Record<string, boolean> | null;
+  reason: string | null;
+  course: string | null;
+}
+
+export interface MissionsHealth {
+  run: string;
+  file_mtime: number | null;
+  reports: MissionReport[];
 }

@@ -34,6 +34,11 @@ sim:
 topics:
   cmd_vel:
     candidates: ["/handle_state", "/cmd_vel"]
+  # Raspberry Pi perception (published by the Pi on domain 8; contract: robot ~/live_mission/PI_SCENE_EVENTS.md).
+  pi_detections:
+    candidates: ["/group8pi/perception/detections"]
+  pi_scene_events:
+    candidates: ["/group8pi/perception/scene_events"]
 
 # Ultrasound: std_msgs/Float64 in metres, 4.5 m = nothing in range (sensor maximum).
 range_topics:
@@ -44,3 +49,8 @@ range_topics:
 # NUC (git-ignored), e.g.:
 #   peers:
 #     - {name: "Raspberry Pi", host: "<pi-ip>", expected_hostname: "group8pi", stats_port: 8766}
+
+# Claude pictures come from pi_reporter on the Pi (peers[].stats_port in local.yaml).
+pi_perception:
+  # Mission reports written by ~/live_mission/pi_mission_reporter.py (one folder per competition run).
+  reports_glob: "~/lite3_ws/log/operator/competition-*/mission_reports.jsonl"

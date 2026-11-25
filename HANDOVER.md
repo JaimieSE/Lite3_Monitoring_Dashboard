@@ -23,7 +23,8 @@ work session so the next human or agent (e.g. Codex) can continue.
 | Copy bridge to NUC (`deploy-bridge.sh` or `git clone` on the NUC) | YES | team, in chat, 2026-11-23 |
 | pip install into the lite3-monitor `.venv` on NUC | YES | team, in chat, 2026-11-23 |
 | Run bridge on NUC | YES | team, in chat, 2026-11-23 |
-| Run read-only `pi_reporter` on the Raspberry Pi (group8pi) | NOT YET - ask team | |
+| Run read-only `pi_reporter` on the Raspberry Pi (group8pi), incl. serving stored scene-check pictures (`--scene-log`) | YES | team, in chat (Claude Code session on group8pi), 2026-11-26 |
+| Node 22 for building/testing the dashboard, unpacked in `~/.local/node` on the Pi only | YES | team, in chat, 2026-11-26 |
 
 Agents: do not perform an action until its row says YES.
 
@@ -301,3 +302,14 @@ _(empty — to be filled by the reviewer)_
   as a LIVE pose near the origin. Now ignored with a TF note; pose falls back to
   odometry. Test updated. Explained "POSE STALE" to the team (pose source older than
   staleness.pose_stale_s = 1 s; nav TF updates only ~2 Hz).
+- 2026-11-26 · Claude Code (on group8pi) · Pi perception panels (team request: see the Pi's
+  detections, Claude scene checks and mission reports in this dashboard). Bridge: new optional
+  roles `pi_detections` / `pi_scene_events` (std_msgs/String JSON, decoded, < 1 Hz; group8.yaml
+  names `/group8pi/perception/detections` and `/scene_events`), `perception.py` (joins Claude
+  requests by request_id + capture stamp; reads the robot's mission_reports.jsonl of the newest
+  run folder, only when it changes) -> `health.perception`, `health.missions`. Pictures: GET
+  `/api/pi/scene_image` relays a stored JPEG from `pi_reporter --scene-log` (validated inputs,
+  cache of 40). Simulator produces both. Web: "Pi sees now", "Claude scene checks", "Mission
+  reports" panels. Verified on the Pi: 51 bridge tests (6 new), read-only audit, typecheck,
+  7 web tests (2 new), production build. Not yet verified: the live bridge on the NUC with these
+  topics, and a browser check on the team's Mac.

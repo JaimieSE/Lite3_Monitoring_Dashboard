@@ -5,12 +5,16 @@ Run ON the Pi, standard library only (no pip install):
     cd ~/Lite3_Monitoring_Dashboard/lite3-monitor/bridge
     python3 -m lite3_bridge.pi_reporter --allow-from <NUC-IP> [--port 8766]
 
-It serves ONE thing: GET /stats -> JSON with hostname, model, power/throttling
+It serves two things. GET /stats -> JSON with hostname, model, power/throttling
 flags, temperature, CPU, memory, SD-card space, and network activity (bytes /
 packets per second per interface, open connections and listening ports with the
 owning process name - like `ifconfig` and `ss -tunap`; no message contents). It reads /proc and /sys only
 (the same information `vcgencmd get_throttled`, `top` and `df` show), runs no
 commands, accepts no input, and answers only the allow-listed address(es).
+Optionally (--scene-log DIR) GET /scene_image?request_id=scene-N&stamp=<capture_stamp_ns> returns ONE
+stored JPEG: the picture the Pi's perception service already saved when it asked Claude about a scene
+(DIR/<service start>/scene-N.jpg, listed in requests.jsonl). Nothing is captured or created; the inputs
+are validated and only select an existing file under DIR.
 Stopping it (Ctrl+C) has no effect on anything else on the Pi.
 """
 from __future__ import annotations
@@ -19,9 +23,11 @@ import argparse
 import glob
 import json
 import os
+import re
 import socket
 import sys
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -208,7 +214,39 @@ def pi_stats(stats: SystemStats, net: Optional["NetCounters"] = None, peer_ips: 
     }
 
 
-def make_handler(stats: SystemStats, allow: List[str]):
+SCENE_ID = re.compile(r"^scene-\d{1,6}$")
+
+
+def find_scene_image(root: Optional[str], request_id: str, stamp: str) -> Optional[str]:
+    """Path of the stored picture for this request, or None.
+
+    Request ids restart at scene-1 when the perception service restarts, so the capture stamp picks the
+    right folder: a folder whose requests.jsonl lists this id with this stamp. A request that is still
+    waiting for Claude is not listed yet; then only the newest folder is used.
+    """
+    if not root or not SCENE_ID.match(request_id) or not stamp.isdigit():
+        return None
+    folders = sorted(glob.glob(os.path.join(root, "[0-9]" * 8 + "-" + "[0-9]" * 6)), reverse=True)
+    for folder in folders:
+        try:
+            with open(os.path.join(folder, "requests.jsonl"), encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if row.get("request_id") == request_id and str(row.get("capture_stamp_ns")) == stamp:
+                        path = os.path.join(folder, f"{request_id}.jpg")
+                        return path if os.path.isfile(path) else None
+        except OSError:
+            continue
+    if folders:
+        path = os.path.join(folders[0], f"{request_id}.jpg")
+        return path if os.path.isfile(path) else None
+    return None
+
+
+def make_handler(stats: SystemStats, allow: List[str], scene_log: Optional[str] = None):
     net = NetCounters()
     net.sample()  # prime counters
     class Handler(BaseHTTPRequestHandler):
@@ -221,12 +259,25 @@ def make_handler(stats: SystemStats, allow: List[str]):
             if allow and self.client_address[0] not in allow:
                 self.send_error(403, "not allowed")
                 return
-            if self.path.split("?")[0] != "/stats":
+            path, _, query = self.path.partition("?")
+            if path == "/scene_image":
+                params = urllib.parse.parse_qs(query)
+                image = find_scene_image(scene_log, (params.get("request_id") or [""])[0],
+                                         (params.get("stamp") or [""])[0])
+                if image is None:
+                    self.send_error(404)
+                    return
+                with open(image, "rb") as fh:
+                    body = fh.read(2_000_000)
+                ctype = "image/jpeg"
+            elif path == "/stats":
+                body = json.dumps(pi_stats(stats, net, allow)).encode()
+                ctype = "application/json"
+            else:
                 self.send_error(404)
                 return
-            body = json.dumps(pi_stats(stats, net, allow)).encode()
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", ctype)
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -239,6 +290,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Read-only Raspberry Pi health reporter")
     ap.add_argument("--port", type=int, default=8766)
     ap.add_argument("--bind", default="0.0.0.0", help="address to listen on (default: all)")
+    ap.add_argument("--scene-log", default=None,
+                    help="folder of stored Claude scene requests to serve read-only (e.g. "
+                         "~/usb-camera-perception/scene_log); omit to serve /stats only")
     ap.add_argument("--allow-from", action="append", default=[],
                     help="client IP allowed to read /stats (repeat; normally the NUC's IP). Required.")
     args = ap.parse_args(argv)
@@ -248,7 +302,8 @@ def main(argv=None) -> int:
         return 2
     stats = SystemStats({"compute": {"components": []}}, simulated=False)
     stats.sample()  # prime CPU counters
-    srv = ThreadingHTTPServer((args.bind, args.port), make_handler(stats, args.allow_from))
+    scene_log = os.path.expanduser(args.scene_log) if args.scene_log else None
+    srv = ThreadingHTTPServer((args.bind, args.port), make_handler(stats, args.allow_from, scene_log))
     print(f"lite3 pi reporter (read-only) on {args.bind}:{args.port}, allowed: {', '.join(args.allow_from)}")
     try:
         srv.serve_forever()

@@ -183,11 +183,35 @@ topics:
     min_hz: null
     single_publisher: false
 
+  # Raspberry Pi perception (std_msgs/String JSON). Empty by default; a robot profile names
+  # the topics (config/group8.yaml). Decoded: they are small and slower than 1 Hz.
+  pi_detections:
+    candidates: []
+    types: ["std_msgs/msg/String"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+  pi_scene_events:
+    candidates: []
+    types: ["std_msgs/msg/String"]
+    expected_hz: null
+    min_hz: null
+    single_publisher: true
+
 # Roles that only exist while optional software (navigation, SLAM, exploration) runs.
 # While absent they are shown as "inactive", never as errors; they switch on by
 # themselves as soon as their topics appear (graph re-scan every few seconds).
 optional_roles: [map, scan, global_plan, local_plan, goal, nav_status, frontiers, exploration_state,
-                 diagnostics, cmd_vel, rosout]
+                 diagnostics, cmd_vel, rosout, pi_detections, pi_scene_events]
+
+# Pi perception panels (health.perception / health.missions). Read-only:
+#   max_requests  Claude scene requests kept for the dashboard
+#   reports_glob  the robot's own mission report log, one JSON line per POST; the newest run
+#                 folder is shown. Empty = no mission panel. The file is only read, never written.
+pi_perception:
+  max_requests: 20
+  max_reports: 20
+  reports_glob: ""
 
 # Robot posture from the IMU: tilt = angle from upright (combines roll and pitch).
 attitude:
