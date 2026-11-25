@@ -206,7 +206,7 @@ Recorded sessions stay on your laptop: **History** tab → export **JSON / CSV**
 | Symptom | Cause / fix |
 |---|---|
 | **CONNECTING** forever, or TELEMETRY LOST right away | Bridge not running on the NUC → do Step 1. Or the tunnel failed: look at the `[tunnel]` lines in your laptop window (wrong password, NUC off, not on the school Wi-Fi). |
-| `Port 8765 … already in use` when starting the bridge | A bridge is already running — fine, use it. To restart cleanly: `pkill -f lite3_bridge`, then Step 1 again. |
+| `A lite3_bridge is ALREADY RUNNING` / `Port 8765 … already in use` when starting the bridge | A bridge is already running - fine, use it. After a `git pull`, replace it with the new code: `~/Lite3_Monitoring_Dashboard/lite3-monitor/scripts/nuc/start-bridge.sh --restart`. If it says the port is used by ANOTHER program, do not stop that program; follow the printed steps to use port 8775. |
 | `REFUSING TO START: ROS_DOMAIN_ID=0 != expected 8` | Your shell does not have the team environment. In tmux run `export ROS_DOMAIN_ID=8` (or open a fresh SSH login) and start again. |
 | `REFUSING TO START: hostname … != expected 'group8'` | You are logged into the wrong computer. Check the IP. |
 | **IDENTITY MISMATCH** (red) in the dashboard | Your `robot.env` says another hostname/domain than the bridge reports. Fix `EXPECTED_HOSTNAME=group8`, `EXPECTED_DOMAIN_ID=8`. |

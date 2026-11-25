@@ -301,3 +301,9 @@ _(empty — to be filled by the reviewer)_
   as a LIVE pose near the origin. Now ignored with a TF note; pose falls back to
   odometry. Test updated. Explained "POSE STALE" to the team (pose source older than
   staleness.pose_stale_s = 1 s; nav TF updates only ~2 Hz).
+- 2026-11-25 · Claude Code · `scripts/nuc/start-bridge.sh`: checks the port before
+  touching ROS. Our bridge running -> "ALREADY RUNNING (PID)" + hint, exit 0;
+  `--restart` stops only `python -m lite3_bridge` processes (TERM, then KILL after 10 s)
+  and starts the new code; a foreign program on the port -> shown via `ss`, never
+  stopped, with steps to move to port 8775 (`LITE3_PORT`). Team kept hitting "port in
+  use" after `git pull`. Tested all three paths locally.
