@@ -331,9 +331,11 @@ def test_static_and_dynamic_tf_for_same_child_do_not_alternate():
     snap = s.pose_snapshot(now + 0.2)
     assert math.isclose(snap["pose"]["x"], 5.71) and snap["pose"]["source"] == "tf"
     assert any("fixed" in e and "moving" in e for e in snap["tf"]["errors"]), snap["tf"]
-    # if the moving transform stops for a long time, the fixed one is used (and the pose is stale-checked)
+    # navigation stops: the fixed map->base_link must NOT become a "live" robot position.
+    s.odom = {"x": 1.5, "y": 0.5, "yaw": 0.0, "frame": "odom", "vx": 0.0, "vy": 0.0, "wz": 0.0, "rx": now + 30}
     late = s.pose_snapshot(now + 30)
-    assert math.isclose(late["pose"]["x"], 0.03)
+    assert late["pose"]["source"] == "odometry" and math.isclose(late["pose"]["x"], 1.5)
+    assert any("fixed (static)" in e for e in late["tf"]["errors"])
 
 
 def test_pose_jump_breaks_trail_and_adds_no_distance():

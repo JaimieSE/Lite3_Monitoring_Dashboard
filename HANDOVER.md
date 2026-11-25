@@ -295,3 +295,9 @@ _(empty — to be filled by the reviewer)_
   RTT, rx/tx kB/s + packets/s, 2-min graph, "talking to" list. The Pi has no ROS node on
   domain 8, so its ROS messages cannot be shown. 45 bridge tests (address decoding,
   reporter sees its own NUC connection), typecheck, audit, browser check.
+- 2026-11-25 · Claude Code · Fix: a pose built only from STATIC transforms is no longer
+  used as the robot position. After navigation stopped, the moving map->base_link aged
+  out and the fixed /tf_static map->base_link (0.03,-0.02; age 0) would have been shown
+  as a LIVE pose near the origin. Now ignored with a TF note; pose falls back to
+  odometry. Test updated. Explained "POSE STALE" to the team (pose source older than
+  staleness.pose_stale_s = 1 s; nav TF updates only ~2 Hz).

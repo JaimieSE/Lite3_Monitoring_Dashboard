@@ -253,14 +253,23 @@ class TelemetryStore:
         tf_info: Dict[str, Any] = {"base_frame": base, "chain": [], "errors": [], "ok": False}
         pose = None
         if base:
-            ch = self._chain(base, frames["map"], now)
+            def live_chain(root: str) -> Optional[Dict[str, Any]]:
+                # A robot position made only of FIXED transforms is not a live pose (e.g. a
+                # placeholder static map->base_link): never present it as the robot's position.
+                c = self._chain(base, root, now)
+                if c is not None and c["edges"] and all(e["static"] for e in c["edges"]):
+                    tf_info["errors"].append(f"{root} -> {base} exists only as fixed (static) transforms - ignored")
+                    return None
+                return c
+
+            ch = live_chain(frames["map"])
             frame = frames["map"]
             if ch is None:
-                tf_info["errors"].append(f"no TF chain {frames['map']} -> {base}")
-                ch = self._chain(base, frames["odom"], now)
+                tf_info["errors"].append(f"no live TF chain {frames['map']} -> {base}")
+                ch = live_chain(frames["odom"])
                 frame = frames["odom"]
                 if ch is None:
-                    tf_info["errors"].append(f"no TF chain {frames['odom']} -> {base}")
+                    tf_info["errors"].append(f"no live TF chain {frames['odom']} -> {base}")
             if ch is not None:
                 tf_info["chain"] = ch["edges"]
                 for e in ch["edges"]:
