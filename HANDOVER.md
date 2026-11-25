@@ -287,3 +287,11 @@ _(empty — to be filled by the reviewer)_
   "inactive" when absent, auto-subscribed when present; group8 map layer re-enabled.
   Simulator: stumbles, efforts, ultrasound ray-cast, logs. 44 bridge tests, web tests,
   typecheck, audit, browser check.
+- 2026-11-25 · Claude Code · "Pi link" panel (team request: is the Pi live, what does it
+  send / receive). pi_reporter now adds `net`: bytes & packets per second per interface
+  from /proc/net/dev, open TCP/UDP connections and listening ports from /proc/net/{tcp,
+  udp}{,6} with the owning process name via /proc/<pid>/fd (like `ss -tunap`), sorted
+  NUC-first (allow-listed IPs = NUC). No message contents. Dashboard: big LIVE/OFFLINE,
+  RTT, rx/tx kB/s + packets/s, 2-min graph, "talking to" list. The Pi has no ROS node on
+  domain 8, so its ROS messages cannot be shown. 45 bridge tests (address decoding,
+  reporter sees its own NUC connection), typecheck, audit, browser check.

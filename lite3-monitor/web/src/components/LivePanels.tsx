@@ -1018,3 +1018,92 @@ export function BodyPanel() {
     </Panel>
   );
 }
+
+/** Compact "is the Pi live, and what is it sending / receiving" view. */
+export function PiLinkPanel() {
+  const { client } = useTelemetry();
+  const peers = client.identityProblem ? [] : client.health?.peers ?? [];
+  const pe = peers[0];
+  const live = client.link === "live";
+  if (!pe) {
+    return (
+      <Panel title="Pi link" className="h-full">
+        <div className="px-3 py-2 text-2xs text-faint">No Raspberry Pi configured (see start-up manual §1b).</div>
+      </Panel>
+    );
+  }
+  const net = pe.online ? pe.stats?.net ?? null : null;
+  const rx = net ? net.interfaces.reduce((a, i) => a + i.rx_Bps, 0) : null;
+  const tx = net ? net.interfaces.reduce((a, i) => a + i.tx_Bps, 0) : null;
+  const rxp = net ? net.interfaces.reduce((a, i) => a + i.rx_pps, 0) : null;
+  const txp = net ? net.interfaces.reduce((a, i) => a + i.tx_pps, 0) : null;
+  const hist = client.peerTraffic.get(pe.name) ?? [];
+  const now = Date.now();
+  const conns = (net?.connections ?? []).filter((c) => !c.loopback);
+  const talking = conns.filter((c) => c.state !== "LISTEN");
+  const listening = conns.filter((c) => c.state === "LISTEN");
+  return (
+    <Panel
+      title={`${pe.name.replace(" (sim)", "")} link`}
+      className="h-full"
+      bodyClass="overflow-auto scroll-thin"
+      right={pe.name.includes("(sim)") ? <span className="text-2xs text-warn">simulated</span> : undefined}
+    >
+      <LiveGate live={live}>
+        <div className="flex items-center gap-3 px-3 pt-2">
+          <span className={`inline-flex h-3 w-3 rounded-full ${pe.online ? "bg-good" : "bg-crit lost-pulse"}`} aria-hidden />
+          <span className={`text-lg font-bold tracking-[0.15em] ${pe.online ? "text-good" : "text-crit"}`}>{pe.online ? "LIVE" : "OFFLINE"}</span>
+          <span className="num text-2xs text-muted">
+            {pe.online ? `${pe.rtt_ms} ms` : pe.last_seen_age_s != null ? `last seen ${fmtAge(pe.last_seen_age_s)} ago` : "never seen"}
+          </span>
+        </div>
+        {net ? (
+          <>
+            <div className="grid grid-cols-2 gap-x-3 px-3 pt-2">
+              <Metric label="Receiving" value={fmtBytesRate(rx)} sub={`${fmt(rxp, 0)} packets/s`} />
+              <Metric label="Sending" value={fmtBytesRate(tx)} sub={`${fmt(txp, 0)} packets/s`} />
+            </div>
+            <div className="px-3 pt-1">
+              <TimeSeriesChart
+                height={90}
+                domain={[now - 120_000, now]}
+                unit="kB/s"
+                digits={1}
+                minSpan={1}
+                xFormat={(x) => { const d = Math.round((x - now) / 1000); return d === 0 ? "now" : `${d}s`; }}
+                series={[
+                  { key: "rx", label: "Receiving", color: "s1", points: hist.map((h) => ({ x: h.t, y: h.rx })) },
+                  { key: "tx", label: "Sending", color: "s2", points: hist.map((h) => ({ x: h.t, y: h.tx })) },
+                ]}
+              />
+            </div>
+            <div className="px-3 py-2 text-2xs">
+              <div className="mb-0.5 text-faint">Talking to ({talking.length})</div>
+              {talking.slice(0, 8).map((c, i) => (
+                <div key={i} className="flex gap-2 leading-5">
+                  <span className="num w-8 uppercase text-faint">{c.proto}</span>
+                  <span className="w-24 truncate text-muted">{c.process ?? "?"}</span>
+                  <span className={`num truncate ${c.to_nuc ? "text-s3" : "text-ink"}`}>
+                    :{c.local_port} → {c.to_nuc ? "NUC" : c.remote}:{c.remote_port}
+                  </span>
+                </div>
+              ))}
+              {talking.length === 0 ? <div className="text-faint">no open connections</div> : null}
+              {listening.length ? (
+                <div className="mt-1 text-faint">
+                  Listening: {listening.map((c) => `${c.process ?? "?"} :${c.local_port}`).join(" · ")}
+                </div>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div className="px-3 py-2 text-2xs text-faint">
+            {pe.online
+              ? "Online. Start the read-only reporter on the Pi to see what it sends and receives (start-up manual §1b)."
+              : pe.error ?? "Not reachable."}
+          </div>
+        )}
+      </LiveGate>
+    </Panel>
+  );
+}

@@ -3,7 +3,7 @@
 import { MapView } from "@/components/MapView";
 import {
   BodyPanel, ComputePanel, DataRatePanel, EventLog, ExplorationPanel, HealthPanel, LiveCharts, PeerPanel,
-  RobotLogPanel, RobotPanel, TemperaturePanel, TfDiagPanel,
+  PiLinkPanel, RobotLogPanel, RobotPanel, TemperaturePanel, TfDiagPanel,
 } from "@/components/LivePanels";
 import { Panel } from "@/components/ui";
 import { useTelemetry } from "@/components/TelemetryProvider";
@@ -32,10 +32,13 @@ export default function LivePage() {
         </div>
       </div>
       <div className="grid grid-cols-12 gap-2">
-        <div className="col-span-12 h-[420px] xl:col-span-6">
+        <div className="col-span-12 h-[420px] xl:col-span-5">
           <BodyPanel />
         </div>
-        <div className="col-span-12 h-[420px] xl:col-span-6">
+        <div className="col-span-12 h-[420px] md:col-span-5 xl:col-span-3">
+          <PiLinkPanel />
+        </div>
+        <div className="col-span-12 h-[420px] md:col-span-7 xl:col-span-4">
           <RobotLogPanel />
         </div>
       </div>

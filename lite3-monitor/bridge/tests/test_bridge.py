@@ -372,6 +372,10 @@ def test_pi_reporter_and_peer_monitor_end_to_end():
     try:
         r = fetch_stats("127.0.0.1", port)
         assert r["stats"]["hostname"] and "throttle" in r["stats"] and "temp_max_c" in r["stats"]
+        net = r["stats"]["net"]
+        assert isinstance(net["interfaces"], list) and isinstance(net["connections"], list)
+        # our own HTTP request is an established connection from an allow-listed address
+        assert any(c["to_nuc"] for c in net["connections"]), net["connections"][:5]
         assert tcp_probe("127.0.0.1", port)["online"]
         mon = PeerMonitor({"peers": [{"name": "Pi", "host": "127.0.0.1", "ssh_port": port, "stats_port": port,
                                       "expected_hostname": "definitely-not-this-host"}]}, simulated=False)
@@ -457,3 +461,10 @@ def test_sim_group8_has_body_data_and_command():
     assert tel["cmd_vel"] is not None  # /handle_state is the command source on group8
     h = {t["name"]: t for t in store.health_message({})["topics"]}
     assert h["/us_publisher/ultrasound_distance"]["range_m"] is not None
+
+
+def test_proc_net_address_decoding():
+    from lite3_bridge.pi_reporter import _hex_ip_port
+    assert _hex_ip_port("4E0AA8C0:2231") == ("192.168.10.78", 0x2231)
+    assert _hex_ip_port("0000000000000000FFFF00004E0AA8C0:0016") == ("192.168.10.78", 22)
+    assert _hex_ip_port("00000000000000000000000001000000:0050")[0] == "::1"

@@ -6,7 +6,9 @@ Run ON the Pi, standard library only (no pip install):
     python3 -m lite3_bridge.pi_reporter --allow-from <NUC-IP> [--port 8766]
 
 It serves ONE thing: GET /stats -> JSON with hostname, model, power/throttling
-flags, temperature, CPU, memory and SD-card space. It reads /proc and /sys only
+flags, temperature, CPU, memory, SD-card space, and network activity (bytes /
+packets per second per interface, open connections and listening ports with the
+owning process name - like `ifconfig` and `ss -tunap`; no message contents). It reads /proc and /sys only
 (the same information `vcgencmd get_throttled`, `top` and `df` show), runs no
 commands, accepts no input, and answers only the allow-listed address(es).
 Stopping it (Ctrl+C) has no effect on anything else on the Pi.
@@ -21,7 +23,7 @@ import socket
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .system_stats import SystemStats, _read
 
@@ -62,7 +64,107 @@ def read_undervoltage_alarm() -> Optional[bool]:
     return None
 
 
-def pi_stats(stats: SystemStats) -> Dict[str, Any]:
+TCP_STATES = {"01": "ESTABLISHED", "02": "SYN_SENT", "03": "SYN_RECV", "04": "FIN_WAIT1", "05": "FIN_WAIT2",
+              "06": "TIME_WAIT", "07": "CLOSE", "08": "CLOSE_WAIT", "09": "LAST_ACK", "0A": "LISTEN", "0B": "CLOSING"}
+
+
+def _hex_ip_port(s: str) -> Tuple[str, int]:
+    ip_hex, port_hex = s.split(":")
+    port = int(port_hex, 16)
+    if len(ip_hex) == 8:  # IPv4, little-endian
+        ip = ".".join(str(int(ip_hex[i:i + 2], 16)) for i in (6, 4, 2, 0))
+    else:  # IPv6: 4 little-endian 32-bit words
+        words = [ip_hex[i:i + 8] for i in range(0, 32, 8)]
+        b = b"".join(bytes.fromhex(w)[::-1] for w in words)
+        if b[:12] == b"\x00" * 10 + b"\xff\xff":  # IPv4-mapped
+            ip = ".".join(str(x) for x in b[12:])
+        else:
+            ip = socket.inet_ntop(socket.AF_INET6, b)
+    return ip, port
+
+
+def _socket_owners() -> Dict[str, str]:
+    """socket inode -> process name, from /proc/<pid>/fd (only processes we may inspect)."""
+    owners: Dict[str, str] = {}
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        fd_dir = f"/proc/{pid}/fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        comm = (_read(f"/proc/{pid}/comm") or "?").strip()[:15]
+        for fd in fds:
+            try:
+                target = os.readlink(f"{fd_dir}/{fd}")
+            except OSError:
+                continue
+            if target.startswith("socket:["):
+                owners[target[8:-1]] = comm
+    return owners
+
+
+def connections(peer_ips: List[str], limit: int = 30) -> List[Dict[str, Any]]:
+    """Open TCP connections / listening ports and active UDP sockets (like `ss -tunap`)."""
+    owners = _socket_owners()
+    out: List[Dict[str, Any]] = []
+    for proto, path in (("tcp", "/proc/net/tcp"), ("tcp", "/proc/net/tcp6"), ("udp", "/proc/net/udp"),
+                        ("udp", "/proc/net/udp6")):
+        lines = (_read(path) or "").splitlines()[1:]
+        for ln in lines:
+            f = ln.split()
+            if len(f) < 10:
+                continue
+            try:
+                lip, lport = _hex_ip_port(f[1])
+                rip, rport = _hex_ip_port(f[2])
+            except (ValueError, OSError):
+                continue
+            state = TCP_STATES.get(f[3], f[3]) if proto == "tcp" else ("CONNECTED" if rport else "OPEN")
+            if proto == "tcp" and state not in ("ESTABLISHED", "LISTEN", "SYN_SENT"):
+                continue
+            if proto == "udp" and lport == 0:
+                continue
+            loop = lip.startswith("127.") or lip == "::1"
+            out.append({"proto": proto, "state": state, "local_port": lport, "remote": None if not rport else rip,
+                        "remote_port": rport or None, "process": owners.get(f[9]), "loopback": loop,
+                        "to_nuc": rip in peer_ips})
+    # most interesting first: to the NUC, then established, then listening; skip loopback noise
+    out.sort(key=lambda c: (not c["to_nuc"], c["loopback"], c["state"] != "ESTABLISHED", c["state"] != "LISTEN"))
+    return out[:limit]
+
+
+class NetCounters:
+    """Bytes / packets per second per network interface, from /proc/net/dev deltas."""
+
+    def __init__(self) -> None:
+        self.prev: Dict[str, Tuple[float, int, int, int, int]] = {}
+
+    def sample(self) -> List[Dict[str, Any]]:
+        now = time.monotonic()
+        out = []
+        for ln in (_read("/proc/net/dev") or "").splitlines()[2:]:
+            if ":" not in ln:
+                continue
+            name, rest = ln.split(":", 1)
+            name = name.strip()
+            v = rest.split()
+            if name == "lo" or len(v) < 10:
+                continue
+            rxb, rxp, txb, txp = int(v[0]), int(v[1]), int(v[8]), int(v[9])
+            prev = self.prev.get(name)
+            self.prev[name] = (now, rxb, rxp, txb, txp)
+            if prev is None or now - prev[0] <= 0:
+                continue
+            dt = now - prev[0]
+            out.append({"iface": name, "rx_Bps": round((rxb - prev[1]) / dt), "tx_Bps": round((txb - prev[3]) / dt),
+                        "rx_pps": round((rxp - prev[2]) / dt, 1), "tx_pps": round((txp - prev[4]) / dt, 1),
+                        "rx_total_mb": round(rxb / 1e6, 1), "tx_total_mb": round(txb / 1e6, 1)})
+        return out
+
+
+def pi_stats(stats: SystemStats, net: Optional["NetCounters"] = None, peer_ips: Optional[List[str]] = None) -> Dict[str, Any]:
     base = stats.sample() or {}
     throttled = read_throttled()
     flags = decode_throttled(throttled)
@@ -101,11 +203,14 @@ def pi_stats(stats: SystemStats) -> Dict[str, Any]:
         "cpu_mhz": base.get("cpu_mhz"),
         "cpu_max_mhz": base.get("cpu_max_mhz"),
         "top": (base.get("top") or [])[:5],
+        "net": None if net is None else {"interfaces": net.sample(), "connections": connections(peer_ips or [])},
         "time": time.time(),
     }
 
 
 def make_handler(stats: SystemStats, allow: List[str]):
+    net = NetCounters()
+    net.sample()  # prime counters
     class Handler(BaseHTTPRequestHandler):
         server_version = "lite3-pi-reporter/1"
 
@@ -119,7 +224,7 @@ def make_handler(stats: SystemStats, allow: List[str]):
             if self.path.split("?")[0] != "/stats":
                 self.send_error(404)
                 return
-            body = json.dumps(pi_stats(stats)).encode()
+            body = json.dumps(pi_stats(stats, net, allow)).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")

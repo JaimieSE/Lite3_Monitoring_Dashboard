@@ -318,6 +318,11 @@ export interface PeerStats {
   disk_total_gb: number | null;
   cpu_mhz: number | null;
   cpu_max_mhz: number | null;
+  /** Network activity on the Pi (like ifconfig / ss); no message contents. */
+  net?: {
+    interfaces: { iface: string; rx_Bps: number; tx_Bps: number; rx_pps: number; tx_pps: number; rx_total_mb: number; tx_total_mb: number }[];
+    connections: { proto: string; state: string; local_port: number; remote: string | null; remote_port: number | null; process: string | null; loopback: boolean; to_nuc: boolean }[];
+  } | null;
 }
 
 export interface Attitude {

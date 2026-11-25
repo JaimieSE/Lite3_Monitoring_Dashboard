@@ -115,6 +115,24 @@ class PeerMonitor:
             "temps": [{"label": "cpu_thermal", "c": temp}], "temp_max_c": temp,
             "disk_free_gb": 18.3, "disk_total_gb": 29.7, "cpu_mhz": 600 if under_v else 1500, "cpu_max_mhz": 1500,
             "top": [{"name": "python3", "component": "Other", "cpu_pct": 12.0, "rss_mb": 60.0}],
+            "net": {
+                "interfaces": [{"iface": "wlan0", "rx_Bps": round(2400 + 900 * math.sin(t / 7.0) + self._rng.uniform(0, 300)),
+                                "tx_Bps": round(5200 + 2500 * math.sin(t / 11.0) + self._rng.uniform(0, 600)),
+                                "rx_pps": round(18 + self._rng.uniform(0, 4), 1), "tx_pps": round(26 + self._rng.uniform(0, 6), 1),
+                                "rx_total_mb": round(12.0 + t * 0.002, 1), "tx_total_mb": round(31.0 + t * 0.005, 1)}],
+                "connections": [
+                    {"proto": "tcp", "state": "ESTABLISHED", "local_port": 8766, "remote": "NUC", "remote_port": 51522,
+                     "process": "python3", "loopback": False, "to_nuc": True},
+                    {"proto": "tcp", "state": "ESTABLISHED", "local_port": 22, "remote": "laptop", "remote_port": 50110,
+                     "process": "sshd", "loopback": False, "to_nuc": False},
+                    {"proto": "udp", "state": "CONNECTED", "local_port": 40121, "remote": "NUC", "remote_port": 9000,
+                     "process": "sensor_node", "loopback": False, "to_nuc": True},
+                    {"proto": "tcp", "state": "LISTEN", "local_port": 8766, "remote": None, "remote_port": None,
+                     "process": "python3", "loopback": False, "to_nuc": False},
+                    {"proto": "tcp", "state": "LISTEN", "local_port": 22, "remote": None, "remote_port": None,
+                     "process": "sshd", "loopback": False, "to_nuc": False},
+                ],
+            },
         }
         return {"online": True, "rtt_ms": round(self._rng.uniform(4, 25), 1), "banner": "SSH-2.0-OpenSSH (sim)",
                 "stats": stats}

@@ -188,6 +188,8 @@ export class TelemetryClient {
   rangeLevels = new Map<string, TempLevel>();
   private seenLogs = new Set<string>();
   maxTilt = 0;
+  /** Per helper computer: received / sent kB/s and response time over time. */
+  peerTraffic = new Map<string, { t: number; rx: number | null; tx: number | null; rtt: number | null }[]>();
   temps: TempPoint[] = [];
   /** Highest NUC temperature seen since the page was opened. */
   tempPeak: { c: number; t: number } | null = null;
@@ -462,6 +464,7 @@ export class TelemetryClient {
       this.peerPrev.clear();
       this.robotLogs = [];
       this.seenLogs.clear();
+      this.peerTraffic.clear();
       this.rangeLevels.clear();
       this.probes = [];
       this.transits = [];
@@ -609,6 +612,17 @@ export class TelemetryClient {
     for (const pe of h.peers ?? []) {
       robot[pe.name] = pe.online ? pe.stats?.temp_max_c ?? null : null;
       this.peerEvents(pe);
+      // traffic history for the Pi link graph (sum over interfaces, kB/s); gaps while offline
+      const ifs = pe.online ? pe.stats?.net?.interfaces ?? null : null;
+      const arr = this.peerTraffic.get(pe.name) ?? [];
+      arr.push({
+        t: now,
+        rx: ifs ? ifs.reduce((a, i) => a + i.rx_Bps, 0) / 1024 : null,
+        tx: ifs ? ifs.reduce((a, i) => a + i.tx_Bps, 0) / 1024 : null,
+        rtt: pe.online ? pe.rtt_ms : null,
+      });
+      cap(arr, 900);
+      this.peerTraffic.set(pe.name, arr);
     }
     const c = h.compute && !h.compute.error ? h.compute : null;
     const sensors: Record<string, number> = {};

@@ -146,6 +146,11 @@ memory and SD-card space. Nothing in this section changes the robot.
    Ctrl+B then D to leave it running. Only the NUC's address may read it; it answers one
    read-only request (`/stats`) and runs no commands.
 
+The **Pi link** panel (next to Robot body) shows LIVE / OFFLINE with response time, how
+much the Pi is receiving and sending (kB/s, packets/s, 2-minute graph) and which programs
+it is talking to (connections to the NUC highlighted) - like `ifconfig` and `ss`, never
+message contents. Traffic and connections need the reporter (step 2).
+
 If the panel says "reporter not answering" while the Pi is online, the reporter is not
 running, or the network blocks port 8766 between the NUC and the Pi.
 
