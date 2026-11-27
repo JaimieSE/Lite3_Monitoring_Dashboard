@@ -44,6 +44,18 @@ def fetch_stats(host: str, port: int, timeout: float = 1.5) -> Dict[str, Any]:
         return {"stats": None, "stats_error": str(exc)[:100]}
 
 
+def fetch_scene_image(host: str, port: int, request_id: str, stamp: str, timeout: float = 3.0) -> Optional[bytes]:
+    """One stored Claude-request picture from the Pi's pi_reporter (read-only file lookup)."""
+    url = f"http://{host}:{port}/scene_image?request_id={request_id}&stamp={stamp}"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            if r.headers.get("Content-Type") != "image/jpeg":
+                return None
+            return r.read(2_000_000)
+    except Exception:
+        return None
+
+
 class PeerMonitor:
     def __init__(self, cfg: Dict[str, Any], simulated: bool):
         self.peers: List[Dict[str, Any]] = [p for p in (cfg.get("peers") or []) if p.get("host") or simulated]

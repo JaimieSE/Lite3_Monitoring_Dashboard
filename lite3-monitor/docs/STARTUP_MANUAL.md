@@ -141,10 +141,12 @@ memory and SD-card space. Nothing in this section changes the robot.
    git clone -b claude/gallant-hamilton-q50da3 https://github.com/jaimiese/Lite3_Monitoring_Dashboard.git   # once
    tmux new -s pireport
    cd ~/Lite3_Monitoring_Dashboard/lite3-monitor/bridge
-   python3 -m lite3_bridge.pi_reporter --allow-from <nuc-ip>
+   python3 -m lite3_bridge.pi_reporter --allow-from <nuc-ip> --scene-log ~/usb-camera-perception/scene_log
    ```
-   Ctrl+B then D to leave it running. Only the NUC's address may read it; it answers one
-   read-only request (`/stats`) and runs no commands.
+   Ctrl+B then D to leave it running. Only the NUC's address may read it; it answers two
+   read-only requests (`/stats`, and `/scene_image` = a picture the perception service already
+   stored for a Claude scene check) and runs no commands. Without `--scene-log` it serves
+   `/stats` only and the scene panel shows no pictures.
 
 The **Pi link** panel (next to Robot body) shows LIVE / OFFLINE with response time, how
 much the Pi is receiving and sending (kB/s, packets/s, 2-minute graph) and which programs
@@ -153,6 +155,19 @@ message contents. Traffic and connections need the reporter (step 2).
 
 If the panel says "reporter not answering" while the Pi is online, the reporter is not
 running, or the network blocks port 8766 between the NUC and the Pi.
+
+### Pi perception panels
+
+Three panels below the Pi link show what the Pi's camera pipeline reports (all read-only):
+
+- **Pi sees now** - the latest detection record: objects, QR text, identified hazard signs,
+  stair/curtain state (greyed out when older than 5 s).
+- **Claude scene checks** - every Claude request since the bridge started: the picture Claude
+  saw (needs step 2 with `--scene-log`), what triggered it, the room it named (amber = `unknown`),
+  its evidence and how long it took.
+- **Mission reports** - the newest competition run's reports from
+  `~/lite3_ws/log/operator/competition-*/mission_reports.jsonl`: what was sent per task, accepted /
+  rejected / dry run, and the practice server's score per field.
 
 ## 2. During a run
 
